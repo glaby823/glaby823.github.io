@@ -1,11 +1,309 @@
-<html lang="en">
+<!DOCTYPE html>
+<html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="style.css">
-    <title>Mon site</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake Multiplayer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+  :root {
+    --bg:#080c14; --panel:#0d1420; --border:#1a2840;
+    --accent:#00ff88; --accent2:#0088ff; --warn:#ffaa00;
+    --danger:#ff4444; --text:#c8d8e8; --muted:#4a6080;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Share Tech Mono',monospace; min-height:100vh; }
+  body::after { content:''; position:fixed; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,136,.015) 2px,rgba(0,255,136,.015) 4px);
+    z-index:9999; }
+
+  header { border-bottom:1px solid var(--border); padding:14px 32px;
+    display:flex; align-items:center; justify-content:space-between;
+    background:rgba(13,20,32,.95); position:sticky; top:0; z-index:100; }
+  .logo { font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.4rem;
+    color:var(--accent); letter-spacing:3px; text-shadow:0 0 20px rgba(0,255,136,.4); }
+  .logo span { color:var(--accent2); }
+  .header-right { display:flex; gap:10px; align-items:center; }
+
+  .container { max-width:960px; margin:0 auto; padding:32px 20px; }
+
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:24px 28px; margin-bottom:20px; }
+  .panel-title { font-family:'Orbitron',sans-serif; font-size:.75rem; color:var(--muted); letter-spacing:2px; margin-bottom:14px; }
+
+  .field-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .field-row label { color:var(--muted); font-size:.78rem; min-width:90px; }
+  .field-row input[type=text], .field-row input[type=password] {
+    flex:1; background:rgba(0,255,136,.05); border:1px solid var(--border);
+    border-radius:8px; padding:9px 14px; color:var(--accent); font-family:inherit;
+    font-size:.88rem; outline:none; transition:.2s; }
+  .field-row input:focus { border-color:var(--accent); }
+
+  .btn { padding:9px 20px; border:none; border-radius:8px; font-family:inherit;
+    font-size:.82rem; cursor:pointer; transition:.15s; font-weight:700; letter-spacing:1px; }
+  .btn-primary { background:var(--accent); color:#000; }
+  .btn-primary:hover { background:#00cc70; transform:translateY(-1px); }
+  .btn-secondary { background:transparent; border:1px solid var(--accent2); color:var(--accent2); }
+  .btn-secondary:hover { background:rgba(0,136,255,.1); }
+  .btn-danger { background:transparent; border:1px solid var(--danger); color:var(--danger); }
+  .btn-danger:hover { background:rgba(255,68,68,.1); }
+  .btn-sm { padding:5px 12px; font-size:.75rem; }
+  .btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
+  .section-title { font-family:'Orbitron',sans-serif; font-size:.78rem; color:var(--muted);
+    letter-spacing:2px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+
+  /* ── Lobbies ── */
+  .lobby-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+  .lobby-card { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px; transition:.2s; cursor:pointer; }
+  .lobby-card:hover { border-color:var(--accent2); transform:translateY(-2px); box-shadow:0 4px 20px rgba(0,136,255,.1); }
+  .lobby-badge { display:inline-block; padding:2px 8px; border-radius:4px;
+    font-size:.68rem; font-weight:700; margin-bottom:8px; }
+  .badge-open     { background:rgba(0,136,255,.2); color:var(--accent2); border:1px solid rgba(0,136,255,.3); }
+  .badge-full     { background:rgba(255,170,0,.2);  color:var(--warn);   border:1px solid rgba(255,170,0,.3); }
+  .badge-playing  { background:rgba(0,255,136,.2);  color:var(--accent); border:1px solid rgba(0,255,136,.3); }
+  .lobby-card h3 { font-size:.88rem; margin-bottom:5px; }
+  .lobby-card p  { font-size:.72rem; color:var(--muted); line-height:1.7; }
+
+  .empty-state { text-align:center; color:var(--muted); padding:48px 20px; }
+  .empty-state .big { font-size:2.8rem; margin-bottom:10px; }
+
+  /* ── Notifs ── */
+  #notifStack { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+    display:flex; flex-direction:column; align-items:center; gap:6px; z-index:500; pointer-events:none; }
+  .notif { font-size:.82rem; padding:9px 18px; border-radius:8px; opacity:0; white-space:nowrap;
+    transform:translateY(-8px); transition:.25s; border:1px solid; max-width:90vw; text-align:center; }
+  .notif.show { opacity:1; transform:translateY(0); }
+  .notif-info    { background:rgba(0,136,255,.18); border-color:rgba(0,136,255,.5); color:#88ccff; }
+  .notif-success { background:rgba(0,255,136,.15); border-color:rgba(0,255,136,.45); color:#00ff88; }
+  .notif-warn    { background:rgba(255,170,0,.15);  border-color:rgba(255,170,0,.45);  color:#ffaa00; }
+  .notif-danger  { background:rgba(255,68,68,.15);   border-color:rgba(255,68,68,.45);   color:#ff6666; }
+
+  /* ── Modal ── */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex;
+    align-items:center; justify-content:center; z-index:300; opacity:0; transition:.2s; pointer-events:none; }
+  .modal-bg.open { opacity:1; pointer-events:all; }
+  .modal { background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:28px 32px; min-width:320px; max-width:95vw; transform:scale(.95); transition:.2s; }
+  .modal-bg.open .modal { transform:scale(1); }
+  .modal h2 { font-family:'Orbitron',sans-serif; font-size:1rem; color:var(--accent);
+    letter-spacing:2px; margin-bottom:18px; }
+
+  /* ── Toast serveur ── */
+  #serverStatus { font-size:.72rem; color:var(--muted); }
+  #serverStatus.ok { color:var(--accent); }
+  #serverStatus.err { color:var(--danger); }
+</style>
 </head>
 <body>
-    <h1 class="titre">Salut</h1>
+<header>
+  <div class="logo">🐍 SNAKE <span>MULTI</span></div>
+  <div class="header-right">
+    <span id="serverStatus">⬤ connexion...</span>
+    <button class="btn btn-secondary btn-sm" onclick="openModal('modalSettings')">⚙ Serveur</button>
+  </div>
+</header>
+
+<div id="notifStack"></div>
+
+<div class="container">
+  <!-- Profil -->
+  <div class="panel">
+    <div class="panel-title">VOTRE PROFIL</div>
+    <div class="field-row">
+      <label>NOM :</label>
+      <input type="text" id="nameInput" maxlength="20" placeholder="Votre pseudo...">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="saveName()">✓ Sauvegarder</button>
+      <button class="btn btn-primary"   onclick="createLobby()">+ Créer une partie</button>
+      <button class="btn btn-secondary" onclick="loadLobbies()">↻ Actualiser</button>
+    </div>
+  </div>
+
+  <!-- Lobbies -->
+  <div class="section-title">PARTIES DISPONIBLES</div>
+  <div class="lobby-grid" id="lobbyGrid">
+    <div class="empty-state"><div class="big">🐍</div>Chargement...</div>
+  </div>
+</div>
+
+<!-- Modal : config serveur -->
+<div class="modal-bg" id="modalSettings">
+  <div class="modal">
+    <h2>CONNEXION SERVEUR</h2>
+    <div class="field-row">
+      <label>URL :</label>
+      <input type="text" id="serverUrl" placeholder="http://192.168.1.x:5555">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="connectServer()">Connecter</button>
+      <button class="btn btn-secondary" onclick="closeModal('modalSettings')">Annuler</button>
+    </div>
+    <p style="font-size:.7rem;color:var(--muted);margin-top:12px">
+      Lancez <code>app.py</code> sur votre réseau local, puis entrez son adresse ici.
+    </p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+// ══════════════════════════════════════════════════════════
+// CONFIG PERSISTANTE
+// ══════════════════════════════════════════════════════════
+let serverUrl = localStorage.getItem('snakeServer') || '';
+let myName    = localStorage.getItem('snakeName')   || '';
+let socket    = null;
+
+document.getElementById('nameInput').value = myName;
+document.getElementById('serverUrl').value = serverUrl;
+
+// ══════════════════════════════════════════════════════════
+// CONNEXION SERVEUR
+// ══════════════════════════════════════════════════════════
+function connectServer() {
+  const url = document.getElementById('serverUrl').value.trim();
+  if (!url) { showNotif('Entrez une URL de serveur', 'danger'); return; }
+  serverUrl = url;
+  localStorage.setItem('snakeServer', serverUrl);
+  closeModal('modalSettings');
+  initSocket();
+}
+
+function initSocket() {
+  if (socket) { socket.disconnect(); socket = null; }
+  if (!serverUrl) {
+    setStatus('err', '⬤ non configuré');
+    openModal('modalSettings');
+    return;
+  }
+  setStatus('', '⬤ connexion...');
+  try {
+    socket = io(serverUrl, { transports:['websocket','polling'], timeout:5000 });
+    socket.on('connect', () => {
+      setStatus('ok', '⬤ connecté');
+      socket.emit('set_name', { name: myName || 'Joueur' });
+      socket.emit('get_lobbies');
+      showNotif('Connecté au serveur', 'success', 2500);
+    });
+    socket.on('disconnect', () => {
+      setStatus('err', '⬤ déconnecté');
+      showNotif('Connexion perdue', 'danger');
+    });
+    socket.on('connect_error', () => {
+      setStatus('err', '⬤ erreur');
+      showNotif('Impossible de joindre le serveur', 'danger');
+    });
+    socket.on('lobby_list',        renderLobbies);
+    socket.on('lobby_list_update', renderLobbies);
+    socket.on('lobby_joined',      onLobbyJoined);
+    socket.on('error', d => showNotif(d.msg, 'danger'));
+  } catch(e) {
+    setStatus('err', '⬤ erreur');
+    showNotif('URL invalide', 'danger');
+  }
+}
+
+function setStatus(cls, txt) {
+  const el = document.getElementById('serverStatus');
+  el.className = cls; el.textContent = txt;
+}
+
+// ══════════════════════════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════════════════════════
+function saveName() {
+  myName = document.getElementById('nameInput').value.trim() || 'Joueur';
+  localStorage.setItem('snakeName', myName);
+  if (socket?.connected) socket.emit('set_name', { name: myName });
+  showNotif('Nom sauvegardé : ' + myName, 'success', 2000);
+}
+
+async function createLobby() {
+  if (!socket?.connected) { showNotif('Non connecté au serveur', 'danger'); return; }
+  saveName();
+  try {
+    const resp = await fetch(serverUrl + '/api/create_lobby', { method:'POST' });
+    const data = await resp.json();
+    goToGame(data.lobby_id);
+  } catch(e) { showNotif('Erreur lors de la création', 'danger'); }
+}
+
+function joinLobby(lid) {
+  if (!socket?.connected) { showNotif('Non connecté au serveur', 'danger'); return; }
+  saveName();
+  goToGame(lid);
+}
+
+function goToGame(lid) {
+  // Stocker l'ID avant navigation
+  sessionStorage.setItem('lobbyId', lid);
+  sessionStorage.setItem('serverUrl', serverUrl);
+  sessionStorage.setItem('playerName', myName);
+  window.location.href = 'game2.html?lobby=' + lid + '&server=' + encodeURIComponent(serverUrl);
+}
+
+function onLobbyJoined(data) {
+  goToGame(data.lobby_id);
+}
+
+function loadLobbies() {
+  if (!socket?.connected) return;
+  socket.emit('get_lobbies');
+}
+
+// ══════════════════════════════════════════════════════════
+// RENDU
+// ══════════════════════════════════════════════════════════
+function renderLobbies(list) {
+  const grid = document.getElementById('lobbyGrid');
+  if (!list || list.length === 0) {
+    grid.innerHTML = '<div class="empty-state"><div class="big">🐍</div>Aucune partie.<br>Créez-en une !</div>';
+    return;
+  }
+  grid.innerHTML = list.map(l => {
+    const full    = l.player_count >= l.max_players;
+    const playing = l.status === 'playing' || l.status === 'countdown';
+    const badge   = playing ? 'badge-playing' : full ? 'badge-full' : 'badge-open';
+    const label   = playing ? 'EN COURS' : full ? 'PLEIN' : 'OUVERT';
+    return `
+      <div class="lobby-card" onclick="joinLobby('${l.id}')">
+        <span class="lobby-badge ${badge}">${label}</span>
+        <h3>${esc(l.name)}</h3>
+        <p>👥 ${l.player_count}/${l.max_players} · 📐 ${l.grid_w}×${l.grid_h}<br>
+           🍎 ${l.food_count} · ⚡ ${l.tick_rate} t/s</p>
+      </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+// MODALS & NOTIFS
+// ══════════════════════════════════════════════════════════
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function showNotif(msg, type='info', duration=4000) {
+  const el = document.createElement('div');
+  el.className = `notif notif-${type}`;
+  el.textContent = msg;
+  document.getElementById('notifStack').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(()=>el.remove(),300); }, duration);
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ══════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════
+if (serverUrl) {
+  initSocket();
+} else {
+  openModal('modalSettings');
+  document.getElementById('lobbyGrid').innerHTML =
+    '<div class="empty-state"><div class="big">🔌</div>Configurez l\'adresse du serveur<br>en haut à droite.</div>';
+}
+setInterval(loadLobbies, 4000);
+</script>
 </body>
 </html>
