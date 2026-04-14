@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake P2P</title>
+<!-- PeerJS pour le P2P WebRTC -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+:root {
+  --bg:#080c14; --panel:#0d1420; --border:#1a2840;
+  --accent:#00ff88; --accent2:#0088ff; --warn:#ffaa00;
+  --danger:#ff4444; --text:#c8d8e8; --muted:#4a6080;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;min-height:100vh;}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,136,.015) 2px,rgba(0,255,136,.015) 4px);z-index:9999;}
+
+header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:14px;
+  background:rgba(13,20,32,.95);position:sticky;top:0;z-index:100;}
+.logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.3rem;color:var(--accent);
+  letter-spacing:3px;text-shadow:0 0 20px rgba(0,255,136,.4);}
+.logo span{color:var(--accent2);}
+.peer-badge{font-size:.7rem;color:var(--muted);border:1px solid var(--border);
+  border-radius:4px;padding:2px 8px;margin-left:auto;}
+.peer-badge.ok{color:var(--accent);border-color:rgba(0,255,136,.3);}
+.peer-badge.err{color:var(--danger);border-color:rgba(255,68,68,.3);}
+
+.container{max-width:960px;margin:0 auto;padding:28px 20px;}
+
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:22px 26px;margin-bottom:20px;}
+.panel-title{font-family:'Orbitron',sans-serif;font-size:.72rem;color:var(--muted);
+  letter-spacing:2px;margin-bottom:14px;}
+
+.field-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.field-row label{color:var(--muted);font-size:.78rem;min-width:80px;white-space:nowrap;}
+.field-row input[type=text]{flex:1;background:rgba(0,255,136,.05);border:1px solid var(--border);
+  border-radius:8px;padding:9px 14px;color:var(--accent);font-family:inherit;font-size:.88rem;outline:none;transition:.2s;}
+.field-row input:focus{border-color:var(--accent);}
+
+.btn{padding:9px 20px;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;
+  cursor:pointer;transition:.15s;font-weight:700;letter-spacing:1px;white-space:nowrap;}
+.btn-primary{background:var(--accent);color:#000;}
+.btn-primary:hover{background:#00cc70;transform:translateY(-1px);}
+.btn-secondary{background:transparent;border:1px solid var(--accent2);color:var(--accent2);}
+.btn-secondary:hover{background:rgba(0,136,255,.1);}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+
+.section-title{font-family:'Orbitron',sans-serif;font-size:.78rem;color:var(--muted);
+  letter-spacing:2px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+
+/* Lobby grid */
+.lobby-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
+.lobby-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+  padding:16px;transition:.2s;cursor:pointer;position:relative;}
+.lobby-card:hover{border-color:var(--accent2);transform:translateY(-2px);box-shadow:0 4px 20px rgba(0,136,255,.12);}
+.lobby-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.68rem;font-weight:700;margin-bottom:8px;}
+.badge-open{background:rgba(0,136,255,.2);color:var(--accent2);border:1px solid rgba(0,136,255,.3);}
+.badge-full{background:rgba(255,170,0,.2);color:var(--warn);border:1px solid rgba(255,170,0,.3);}
+.badge-playing{background:rgba(0,255,136,.2);color:var(--accent);border:1px solid rgba(0,255,136,.3);}
+.lobby-card h3{font-size:.88rem;margin-bottom:5px;}
+.lobby-card p{font-size:.72rem;color:var(--muted);line-height:1.8;}
+.lobby-ping{position:absolute;top:12px;right:12px;font-size:.65rem;color:var(--muted);}
+
+.empty-state{text-align:center;color:var(--muted);padding:50px 20px;}
+.empty-state .big{font-size:2.8rem;margin-bottom:10px;}
+
+/* Notifications */
+#notifStack{position:fixed;top:58px;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:6px;z-index:500;pointer-events:none;}
+.notif{font-size:.82rem;padding:9px 18px;border-radius:8px;opacity:0;white-space:nowrap;
+  transform:translateY(-8px);transition:.25s;border:1px solid;max-width:90vw;text-align:center;}
+.notif.show{opacity:1;transform:translateY(0);}
+.notif-info{background:rgba(0,136,255,.18);border-color:rgba(0,136,255,.5);color:#88ccff;}
+.notif-success{background:rgba(0,255,136,.15);border-color:rgba(0,255,136,.45);color:#00ff88;}
+.notif-warn{background:rgba(255,170,0,.15);border-color:rgba(255,170,0,.45);color:#ffaa00;}
+.notif-danger{background:rgba(255,68,68,.15);border-color:rgba(255,68,68,.45);color:#ff6666;}
+
+/* Spinner */
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🐍 SNAKE <span>P2P</span></div>
+  <span class="peer-badge" id="peerBadge"><span class="spinner"></span>connexion P2P...</span>
+</header>
+<div id="notifStack"></div>
+
+<div class="container">
+
+  <!-- Profil -->
+  <div class="panel">
+    <div class="panel-title">VOTRE PROFIL</div>
+    <div class="field-row">
+      <label>NOM :</label>
+      <input type="text" id="nameInput" maxlength="20" placeholder="Votre pseudo...">
+    </div>
+    <div id="myPeerId" style="font-size:.68rem;color:var(--muted);margin-top:4px;min-height:16px;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="saveName()">✓ Sauvegarder</button>
+      <button class="btn btn-primary"   onclick="createLobby()" id="createBtn" disabled>+ Créer une partie</button>
+      <button class="btn btn-secondary" onclick="refreshLobbies()">↻ Actualiser</button>
+    </div>
+  </div>
+
+  <!-- Lobbies -->
+  <div class="section-title">PARTIES EN COURS</div>
+  <div class="lobby-grid" id="lobbyGrid">
+    <div class="empty-state"><div class="big">🐍</div><span class="spinner"></span> Recherche de parties...</div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// CONSTANTES
+// ══════════════════════════════════════════════════════════
+// Canal partagé pour la liste des lobbies : tous les hôtes se connectent à ce peer
+// On utilise un ID fixe et public que tout le monde connaît
+const LOBBY_REGISTRY_ID = 'snake-p2p-lobby-registry-v2';
+// En pratique PeerJS ne permet pas de "serveur" statique gratuit,
+// donc on utilise une approche broadcast :
+// Chaque hôte annonce sa partie via localStorage (même réseau local)
+// ET via un peer "directory" commun si accessible.
+
+const COLORS = ['#00ff88','#ff4444','#4488ff','#ffaa00','#ff44ff','#44ffff','#ffff44','#ff8800','#ff66aa','#66ffcc'];
+
+let myName  = localStorage.getItem('snakeName') || '';
+let myPeer  = null;
+let myPeerId = null;
+let lobbies  = {};  // {peerId: lobbyInfo}
+
+document.getElementById('nameInput').value = myName;
+
+// ══════════════════════════════════════════════════════════
+// PEER INIT
+// ══════════════════════════════════════════════════════════
+function initPeer() {
+  myPeer = new Peer(undefined, {
+    host: 'peerjs.com', port: 443, path: '/', secure: true,
+    config: { iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ]},
+    debug: 0,
+  });
+
+  myPeer.on('open', (id) => {
+    myPeerId = id;
+    setBadge('ok', '⬤ P2P actif');
+    document.getElementById('createBtn').disabled = false;
+    document.getElementById('myPeerId').textContent = 'Votre ID : ' + id;
+    showNotif('Connecté au réseau P2P', 'success', 2500);
+    loadStoredLobbies();
+    pingStoredLobbies();
+  });
+
+  myPeer.on('error', (err) => {
+    setBadge('err', '⬤ erreur P2P');
+    if (err.type === 'peer-unavailable') return; // Normal quand on ping des lobbies disparus
+    showNotif('Erreur P2P : ' + err.type, 'danger');
+  });
+
+  // Recevoir des connexions entrantes (quand on est hôte)
+  myPeer.on('connection', (conn) => {
+    // Redirigé vers game2.html qui gère les connexions hôte
+    // Ici on stocke juste pour transmission
+    window._pendingConn = conn;
+  });
+}
+
+function setBadge(cls, txt) {
+  const el = document.getElementById('peerBadge');
+  el.className = 'peer-badge ' + cls;
+  el.innerHTML = txt;
+}
+
+// ══════════════════════════════════════════════════════════
+// STOCKAGE LOBBIES (localStorage pour réseau local + annonce)
+// ══════════════════════════════════════════════════════════
+const LS_KEY = 'snake_p2p_lobbies';
+
+function announceLobby(info) {
+  // Sauvegarder dans localStorage (visible sur le même navigateur/onglet)
+  const all = getStoredLobbies();
+  all[info.peerId] = { ...info, ts: Date.now() };
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+}
+
+function removeLobby(peerId) {
+  const all = getStoredLobbies();
+  delete all[peerId];
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+}
+
+function getStoredLobbies() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+  catch(e) { return {}; }
+}
+
+function loadStoredLobbies() {
+  const all = getStoredLobbies();
+  const now = Date.now();
+  // Filtrer les lobbies trop vieux (> 60s sans heartbeat)
+  Object.keys(all).forEach(id => {
+    if (now - all[id].ts > 60000) delete all[id];
+  });
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+  lobbies = {};
+  Object.values(all).forEach(l => { lobbies[l.peerId] = l; });
+  renderLobbies();
+}
+
+async function pingStoredLobbies() {
+  // Tenter de contacter chaque hôte pour vérifier qu'il est toujours en vie
+  const all = getStoredLobbies();
+  for (const [peerId, info] of Object.entries(all)) {
+    if (peerId === myPeerId) continue;
+    pingHost(peerId, info);
+  }
+}
+
+function pingHost(peerId, info) {
+  if (!myPeer || !myPeerId) return;
+  const conn = myPeer.connect(peerId, { reliable: false, metadata: { type: 'ping' } });
+  const timeout = setTimeout(() => {
+    // Hôte ne répond pas → retirer
+    delete lobbies[peerId];
+    removeLobby(peerId);
+    renderLobbies();
+    conn.close();
+  }, 4000);
+
+  conn.on('open', () => {
+    clearTimeout(timeout);
+    conn.send(JSON.stringify({ type: 'ping' }));
+  });
+
+  conn.on('data', (raw) => {
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'pong') {
+        // Mettre à jour les infos du lobby
+        lobbies[peerId] = { ...info, ...msg.lobby, ts: Date.now() };
+        announceLobby(lobbies[peerId]);
+        renderLobbies();
+      }
+    } catch(e) {}
+    conn.close();
+  });
+
+  conn.on('error', () => {
+    clearTimeout(timeout);
+    delete lobbies[peerId];
+    removeLobby(peerId);
+    renderLobbies();
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════════════════════════
+function saveName() {
+  myName = document.getElementById('nameInput').value.trim() || 'Joueur';
+  localStorage.setItem('snakeName', myName);
+  showNotif('Nom sauvegardé : ' + myName, 'success', 2000);
+}
+
+function createLobby() {
+  if (!myPeerId) { showNotif('P2P non prêt', 'danger'); return; }
+  saveName();
+  // Annoncer le lobby
+  const info = {
+    peerId: myPeerId,
+    name: myName + "'s game",
+    host: myName,
+    playerCount: 1,
+    maxPlayers: 8,
+    status: 'waiting',
+    ts: Date.now(),
+  };
+  announceLobby(info);
+  sessionStorage.setItem('hostMode', '1');
+  sessionStorage.setItem('playerName', myName);
+  sessionStorage.setItem('myPeerId', myPeerId);
+  window.location.href = 'game2.html?host=1';
+}
+
+function joinLobby(peerId) {
+  if (!myPeerId) { showNotif('P2P non prêt', 'danger'); return; }
+  saveName();
+  sessionStorage.setItem('hostMode', '0');
+  sessionStorage.setItem('targetPeerId', peerId);
+  sessionStorage.setItem('playerName', myName);
+  sessionStorage.setItem('myPeerId', myPeerId);
+  window.location.href = 'game2.html?join=' + peerId;
+}
+
+function refreshLobbies() {
+  loadStoredLobbies();
+  pingStoredLobbies();
+  showNotif('Actualisation...', 'info', 1500);
+}
+
+// ══════════════════════════════════════════════════════════
+// RENDU
+// ══════════════════════════════════════════════════════════
+function renderLobbies() {
+  const grid = document.getElementById('lobbyGrid');
+  const list = Object.values(lobbies).filter(l => l.peerId !== myPeerId);
+  if (list.length === 0) {
+    grid.innerHTML = '<div class="empty-state"><div class="big">🐍</div>Aucune partie.<br>Créez-en une !</div>';
+    return;
+  }
+  grid.innerHTML = list.map(l => {
+    const full    = l.playerCount >= l.maxPlayers;
+    const playing = l.status === 'playing';
+    const badge   = playing ? 'badge-playing' : full ? 'badge-full' : 'badge-open';
+    const label   = playing ? 'EN COURS' : full ? 'PLEIN' : 'OUVERT';
+    const ago     = Math.round((Date.now() - l.ts) / 1000);
+    return `
+      <div class="lobby-card" onclick="joinLobby('${l.peerId}')">
+        <span class="lobby-badge ${badge}">${label}</span>
+        <span class="lobby-ping">${ago}s</span>
+        <h3>${esc(l.name)}</h3>
+        <p>👤 Hôte : ${esc(l.host)}<br>
+           👥 ${l.playerCount}/${l.maxPlayers} joueurs<br>
+           📐 ${l.gridW||25}×${l.gridH||18}</p>
+      </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════════════════
+function showNotif(msg, type='info', duration=4000) {
+  const el = document.createElement('div');
+  el.className = `notif notif-${type}`; el.textContent = msg;
+  document.getElementById('notifStack').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(()=>el.remove(),300); }, duration);
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// Init
+initPeer();
+// Actualiser toutes les 5 secondes
+setInterval(() => { loadStoredLobbies(); pingStoredLobbies(); }, 5000);
+</script>
+</body>
+</html>
