@@ -77,8 +77,81 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="empty-state"><div class="big">🐍</div>Connexion P2P en cours...</div>
   </div>
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script>
-const LS_LOBBIES = 'snakep2p_lobbies_v3';
+// Firebase Realtime Database — registre public des lobbies
+// Remplacez ces valeurs par votre propre projet Firebase gratuit si vous voulez
+// (Créer sur https://console.firebase.google.com → Realtime Database → mode test)
+const FIREBASE_CFG = {
+  apiKey: "238847906143",
+  databaseURL: "https://snake-p2p-dca09-default-rtdb.europe-west1.firebasedatabase.app",
+};
+// ─────────────────────────────────────────────────────────────
+// REGISTRE DE LOBBIES via Firebase Realtime Database
+// Chaque lobby = /lobbies/{peerId} = {id, name, host, players, maxPlayers, gw, gh, status, ts}
+// TTL : les entrées > 15s sans heartbeat sont ignorées côté client
+// ─────────────────────────────────────────────────────────────
+let fbApp = null, fbDb = null, fbRef = null;
+
+function initFirebase() {
+  try {
+    fbApp = firebase.initializeApp(FIREBASE_CFG);
+    fbDb  = firebase.database();
+    fbRef = fbDb.ref('lobbies');
+    return true;
+  } catch(e) {
+    console.warn('Firebase non disponible, fallback localStorage:', e);
+    return false;
+  }
+}
+
+function fbSet(id, data) {
+  if (fbRef) {
+    fbRef.child(id).set({...data, ts: firebase.database.ServerValue.TIMESTAMP});
+  } else {
+    // fallback localStorage
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    all[id] = {...data, ts: Date.now()};
+    localStorage.setItem('snakep2p_v4', JSON.stringify(all));
+  }
+}
+
+function fbRemove(id) {
+  if (fbRef) fbRef.child(id).remove();
+  else {
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    delete all[id]; localStorage.setItem('snakep2p_v4', JSON.stringify(all));
+  }
+}
+
+function fbOnce(cb) {
+  if (fbRef) {
+    fbRef.once('value', snap => {
+      const val = snap.val() || {};
+      // Filtrer TTL > 20s
+      const now = Date.now();
+      cb(Object.fromEntries(Object.entries(val).filter(([,l]) => now - (l.ts||0) < 20000)));
+    });
+  } else {
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    const now = Date.now();
+    cb(Object.fromEntries(Object.entries(all).filter(([,l]) => now - (l.ts||0) < 20000)));
+  }
+}
+
+function fbListen(cb) {
+  if (fbRef) {
+    fbRef.on('value', snap => {
+      const val = snap.val() || {};
+      const now = Date.now();
+      cb(Object.fromEntries(Object.entries(val).filter(([,l]) => now - (l.ts||0) < 20000)));
+    });
+  }
+}
+</script>
+<script>
+const LS_LOBBIES = 'snakep2p_v4'; // aussi utilisé en fallback
 const COLORS = ['#00ff88','#ff4444','#4488ff','#ffaa00','#ff44ff','#44ffff','#ffff44','#ff8800'];
 let peer = null, myId = null;
 let myName = localStorage.getItem('snakeName') || '';
@@ -86,6 +159,7 @@ document.getElementById('nameInput').value = myName;
 
 // ── Peer ──────────────────────────────────────────────────
 function initPeer() {
+  initFirebase();
   setBadge('wait', '⬤ connexion...');
   // Utiliser le serveur PeerJS public (0.peerjs.com)
   peer = new Peer({
@@ -100,6 +174,8 @@ function initPeer() {
     document.getElementById('myId').textContent = 'ID : ' + id;
     document.getElementById('createBtn').disabled = false;
     showNotif('P2P prêt', 'success', 2000);
+    // Écouter les changements Firebase en temps réel
+    fbListen(all => renderLobbies(Object.values(all).filter(l => l.id !== myId)));
     refresh();
   });
   peer.on('error', e => {
@@ -119,27 +195,8 @@ function setBadge(cls, txt) {
 }
 
 // ── Lobby registry (localStorage) ─────────────────────────
-function getLobbies() {
-  try { return JSON.parse(localStorage.getItem(LS_LOBBIES) || '{}'); } catch { return {}; }
-}
-function saveLobbyEntry(info) {
-  const all = getLobbies(); all[info.id] = {...info, ts: Date.now()};
-  localStorage.setItem(LS_LOBBIES, JSON.stringify(all));
-}
-function removeLobbyEntry(id) {
-  const all = getLobbies(); delete all[id];
-  localStorage.setItem(LS_LOBBIES, JSON.stringify(all));
-}
-
 function refresh() {
-  const all = getLobbies(), now = Date.now();
-  // Supprimer entrées trop vieilles (> 20s sans heartbeat)
-  let changed = false;
-  for (const [id, l] of Object.entries(all)) {
-    if (now - l.ts > 20000) { delete all[id]; changed = true; }
-  }
-  if (changed) localStorage.setItem(LS_LOBBIES, JSON.stringify(all));
-  renderLobbies(Object.values(all).filter(l => l.id !== myId));
+  fbOnce(all => renderLobbies(Object.values(all).filter(l => l.id !== myId)));
 }
 
 function renderLobbies(list) {
@@ -173,9 +230,7 @@ function createLobby() {
   sessionStorage.setItem('snake_myId', myId);
   sessionStorage.setItem('snake_name', myName);
   sessionStorage.setItem('snake_targetId', '');
-  
-  // MODIFIÉ ICI :
-  window.location.href = 'game.html'; 
+  window.location.href = 'game.html';
 }
 
 function join(hostId) {
@@ -185,9 +240,7 @@ function join(hostId) {
   sessionStorage.setItem('snake_myId', myId);
   sessionStorage.setItem('snake_name', myName);
   sessionStorage.setItem('snake_targetId', hostId);
-  
-  // MODIFIÉ ICI :
-  window.location.href = 'game.html'; 
+  window.location.href = 'game.html';
 }
 
 // ── Utils ─────────────────────────────────────────────────
