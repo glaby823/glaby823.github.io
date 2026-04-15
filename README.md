@@ -6,4 +6,8 @@ Il faut aller sur [ce site](https://glaby823.github.io/) et ensuite choisir sur 
 
 ### Snake
 
-Un jeu de snake en multi, un genre de battle royale
+Un jeu de snake en multi, un genre de battle royale.
+
+#### Le faire fonctionner soi-même.
+
+Il suffit de modifier **Keyapi** et **databaseURL** dans **index.html** et **game.html** du projet snake.
