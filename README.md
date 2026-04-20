@@ -11,3 +11,7 @@ Un jeu de snake en multi, un genre de battle royale.
 #### Le faire fonctionner soi-même.
 
 Le projet utilise firebase, il suffit de modifier **Keyapi** et **databaseURL** dans **index.html** et **game.html** du projet snake.
+
+### Démineur
+
+Un jeu de démineur toujours en multi, soit en coop soit en adverse
