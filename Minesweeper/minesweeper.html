@@ -191,7 +191,6 @@
     background: var(--border);
     border-radius: 4px;
     overflow: hidden;
-    touch-action: none;
   }
   .cell {
     width: 32px; height: 32px;
@@ -264,6 +263,55 @@
     .cell.flagged::after { font-size: 13px; }
     .cell.mine-show::after { font-size: 13px; }
   }
+
+  /* ── MOBILE TOOLBAR ──────────────── */
+  #mobileToolbar {
+    display: none;
+    flex-shrink: 0;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+  }
+  @media (max-width: 768px) and (pointer: coarse) {
+    #mobileToolbar { display: flex; }
+    #toast { bottom: 80px; }
+  }
+  #modeToggleBtn {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px; letter-spacing: 1px;
+    padding: 10px 24px; border-radius: 4px; border: 2px solid var(--border);
+    background: var(--bg); color: var(--text);
+    cursor: pointer; transition: all .15s; width: 200px; justify-content: center;
+  }
+  #modeToggleBtn.flag-mode {
+    border-color: var(--flag); color: var(--flag);
+    background: rgba(249,115,22,.1);
+  }
+  #modeToggleBtn .mode-icon { font-size: 18px; }
+
+  /* ── PAN CONTAINER ───────────────── */
+  .game-area {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px;
+    position: relative;
+    box-sizing: border-box;
+    touch-action: none;
+  }
+  .pan-container {
+    position: relative;
+    transform-origin: top left;
+    will-change: transform;
+  }
+  .grid-wrapper { position: relative; display: inline-block; user-select: none; }
+
   .section-title { font-family: 'Teko', sans-serif; font-size: 18px; letter-spacing: 2px; color: var(--muted); margin-bottom: 12px; }
   .divider { height: 1px; background: var(--border); margin: 16px 0; }
   a.link { color: var(--accent); text-decoration: none; }
@@ -407,9 +455,17 @@
     <button class="btn-secondary" style="font-size:12px; padding:6px 12px" onclick="leaveLobby()">Quitter</button>
   </div>
   <div class="game-area" id="gameArea">
-    <div class="grid-wrapper" id="gridWrapper">
-      <div id="gameGrid"></div>
+    <div class="pan-container" id="panContainer">
+      <div class="grid-wrapper" id="gridWrapper">
+        <div id="gameGrid"></div>
+      </div>
     </div>
+  </div>
+  <div id="mobileToolbar">
+    <button id="modeToggleBtn" onclick="toggleMobileMode()">
+      <span class="mode-icon">⛏️</span>
+      <span id="modeLabel">CREUSER</span>
+    </button>
   </div>
 </div>
 
@@ -481,6 +537,28 @@ let myColor = '';
 const COLORS = ['#4ade80','#60a5fa','#f97316','#f472b6','#a78bfa','#34d399','#fbbf24','#f87171'];
 let remoteCursors = {}; // peerId -> {el, name}
 let firstClick = true;
+
+// Mobile mode
+let mobileMode = 'dig'; // 'dig' | 'flag'
+function toggleMobileMode() {
+  mobileMode = mobileMode === 'dig' ? 'flag' : 'dig';
+  const btn = document.getElementById('modeToggleBtn');
+  const lbl = document.getElementById('modeLabel');
+  if (mobileMode === 'flag') {
+    btn.classList.add('flag-mode');
+    btn.querySelector('.mode-icon').textContent = '🚩';
+    lbl.textContent = 'DRAPEAU';
+  } else {
+    btn.classList.remove('flag-mode');
+    btn.querySelector('.mode-icon').textContent = '⛏️';
+    lbl.textContent = 'CREUSER';
+  }
+}
+
+// Pan state
+let panX = 0, panY = 0;
+let panStartX = 0, panStartY = 0, panTouchStartX = 0, panTouchStartY = 0;
+let isPanning = false, panMoved = false;
 
 /* ════════════════════════════════════════════════════════
    UTILS
@@ -895,17 +973,22 @@ const NUM_COLORS = ['','#60a5fa','#4ade80','#f87171','#818cf8','#fb923c','#34d39
 function buildGameGrid() {
   const { gw, gh } = gameSettings;
   const grid = document.getElementById('gameGrid');
+  const isMobile = window.matchMedia('(pointer: coarse)').matches;
 
-  // Calculate optimal cell size to fit viewport
-  const topbarH = document.querySelector('.topbar') ? document.querySelector('.topbar').offsetHeight + 32 : 90;
-  const availW = window.innerWidth - 32;
-  const availH = window.innerHeight - topbarH;
-  const cellW = Math.floor(availW / gw);
-  const cellH = Math.floor(availH / gh);
-  const cellSize = Math.max(22, Math.min(36, cellW, cellH));
-  const fontSize = Math.max(11, Math.floor(cellSize * 0.52));
+  // On mobile: fixed cell size (34px) and allow panning
+  // On desktop: shrink-to-fit
+  let cellSize, fontSize;
+  if (isMobile) {
+    cellSize = 34;
+    fontSize = 14;
+  } else {
+    const topbarH = (document.querySelector('.topbar')?.offsetHeight || 56) + 32;
+    const availW = window.innerWidth - 32;
+    const availH = window.innerHeight - topbarH;
+    cellSize = Math.max(22, Math.min(36, Math.floor(availW / gw), Math.floor(availH / gh)));
+    fontSize = Math.max(11, Math.floor(cellSize * 0.52));
+  }
 
-  // Apply dynamic cell size — append AFTER static styles so it wins
   let dynStyle = document.getElementById('dynamicCellStyle');
   if (!dynStyle) { dynStyle = document.createElement('style'); dynStyle.id = 'dynamicCellStyle'; document.head.appendChild(dynStyle); }
   dynStyle.textContent = `
@@ -916,40 +999,105 @@ function buildGameGrid() {
 
   grid.style.gridTemplateColumns = `repeat(${gw}, ${cellSize}px)`;
   grid.innerHTML = '';
+
   for (let r = 0; r < gh; r++) {
     for (let c = 0; c < gw; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.dataset.r = r; cell.dataset.c = c;
-      cell.addEventListener('click', onCellClick);
-      cell.addEventListener('contextmenu', onCellRightClick);
-      // Long press for mobile flag
-      let longPressTimer = null;
-      let longPressFired = false;
-      cell.addEventListener('touchstart', e => {
-        longPressFired = false;
-        longPressTimer = setTimeout(() => {
-          longPressFired = true;
-          onCellFlag(+cell.dataset.c, +cell.dataset.r);
-          // Vibrate feedback if supported
-          if (navigator.vibrate) navigator.vibrate(40);
-        }, 450);
-      }, { passive: true });
-      cell.addEventListener('touchend', e => {
-        clearTimeout(longPressTimer);
-        if (longPressFired) {
-          // Block the click event that fires after touchend
-          e.preventDefault();
-        }
-      });
-      cell.addEventListener('touchmove', () => { clearTimeout(longPressTimer); longPressFired = false; });
+      // Desktop only: click + right-click (mobile handled by pan layer)
+      if (!isMobile) {
+        cell.addEventListener('click', onCellClick);
+        cell.addEventListener('contextmenu', onCellRightClick);
+      }
       grid.appendChild(cell);
     }
   }
-  // Mouse tracking for cursors
-  const wrapper = document.getElementById('gridWrapper');
-  wrapper.addEventListener('mousemove', onMouseMove);
+
+  // Reset pan
+  panX = 0; panY = 0;
+  applyPan();
+
+  // Setup pan+tap handler on gameArea
+  setupPan(isMobile);
+
+  // Mouse tracking for cursors (desktop)
+  if (!isMobile) {
+    const wrapper = document.getElementById('gridWrapper');
+    wrapper.addEventListener('mousemove', onMouseMove);
+  }
   renderAllCells();
+}
+
+function applyPan() {
+  const container = document.getElementById('panContainer');
+  if (container) container.style.transform = `translate(${panX}px, ${panY}px)`;
+}
+
+function setupPan(isMobile) {
+  const area = document.getElementById('gameArea');
+  if (!isMobile) return; // desktop uses normal scroll/click
+
+  let startX = 0, startY = 0, startPanX = 0, startPanY = 0, moved = false;
+  const THRESHOLD = 8;
+
+  area.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startPanX = panX;
+    startPanY = panY;
+    moved = false;
+  }, { passive: true });
+
+  area.addEventListener('touchmove', e => {
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    if (!moved && Math.hypot(dx, dy) > THRESHOLD) moved = true;
+    if (moved) {
+      e.preventDefault();
+      const container = document.getElementById('panContainer');
+      const areaEl = document.getElementById('gameArea');
+      const gridW = container ? container.offsetWidth : 0;
+      const gridH = container ? container.offsetHeight : 0;
+      const areaW = areaEl ? areaEl.offsetWidth : window.innerWidth;
+      const areaH = areaEl ? areaEl.offsetHeight : window.innerHeight;
+      const minX = Math.min(0, areaW - gridW - 16);
+      const minY = Math.min(0, areaH - gridH - 16);
+      panX = Math.max(minX, Math.min(16, startPanX + dx));
+      panY = Math.max(minY, Math.min(16, startPanY + dy));
+      applyPan();
+    }
+  }, { passive: false });
+
+  area.addEventListener('touchend', e => {
+    if (moved) return; // was pan, ignore
+    const touch = e.changedTouches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!el) return;
+    const cell = el.closest ? el.closest('.cell') : null;
+    if (!cell) return;
+    const c = +cell.dataset.c, r = +cell.dataset.r;
+    if (isNaN(c) || isNaN(r)) return;
+    if (mobileMode === 'flag') {
+      onCellFlag(c, r);
+      if (navigator.vibrate) navigator.vibrate(30);
+    } else {
+      if (!gameActive || gameOver) return;
+      if (board[r] && board[r][c] && (board[r][c].flagged || board[r][c].revealed)) return;
+      if (isHost) {
+        if (firstClick) {
+          firstClick = false;
+          buildBoard(c, r);
+          broadcastToGuests({ type: 'board_ready', board: boardToTransfer() });
+        }
+        processReveal(c, r, myName);
+      } else {
+        if (hostConn) hostConn.send({ type: 'reveal', col: c, row: r, name: myName });
+      }
+    }
+  }, { passive: true });
 }
 
 function renderAllCells() {
@@ -1252,6 +1400,9 @@ function clearAllCursors() {
 function leaveLobby() {
   clearInterval(timerInterval);
   gameActive = false; gameOver = false;
+  mobileMode = 'dig';
+  const btn = document.getElementById('modeToggleBtn');
+  if (btn) { btn.classList.remove('flag-mode'); btn.querySelector('.mode-icon').textContent = '⛏️'; document.getElementById('modeLabel').textContent = 'CREUSER'; }
   document.getElementById('overlay').classList.remove('show');
   clearAllCursors();
 
