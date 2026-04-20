@@ -275,7 +275,7 @@
 <!-- ═══════════════════ MENU SCREEN ═══════════════════ -->
 <div id="menuScreen" class="screen active">
   <div class="title-wrap">
-    <h1>MINESWEEPER</h1>
+    <h1><a href="../index.html">MINESWEEPER</a></h1>
     <div class="subtitle">MULTIJOUEUR · P2P</div>
   </div>
   <div class="card">
@@ -444,6 +444,25 @@ const fbDb = firebase.database();
 const FB_PATH = 'games/minesweeper/lobbies';
 
 /* ════════════════════════════════════════════════════════
+   COOKIES
+════════════════════════════════════════════════════════ */
+function setCookie(name, value, days = 365) {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+}
+function getCookie(name) {
+  return document.cookie.split('; ').reduce((r, c) => {
+    const [k, v] = c.split('=');
+    return k === name ? decodeURIComponent(v) : r;
+  }, null);
+}
+// Load saved name on page load
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = getCookie('msw_name');
+  if (saved) document.getElementById('playerName').value = saved;
+});
+
+/* ════════════════════════════════════════════════════════
    STATE
 ════════════════════════════════════════════════════════ */
 let myName = '', myPeer = null, myPeerId = '';
@@ -493,10 +512,14 @@ function randColor(idx) { return COLORS[idx % COLORS.length]; }
 ════════════════════════════════════════════════════════ */
 function goToCreate() {
   myName = document.getElementById('playerName').value.trim() || 'Joueur';
+  document.getElementById('playerName').value = myName;
+  setCookie('msw_name', myName);
   showScreen('createScreen');
 }
 function goToJoin() {
   myName = document.getElementById('playerName').value.trim() || 'Joueur';
+  document.getElementById('playerName').value = myName;
+  setCookie('msw_name', myName);
   showScreen('joinScreen');
   startListeningLobbies();
 }
@@ -901,15 +924,25 @@ function buildGameGrid() {
       cell.addEventListener('click', onCellClick);
       cell.addEventListener('contextmenu', onCellRightClick);
       // Long press for mobile flag
-      let longPressTimer;
+      let longPressTimer = null;
+      let longPressFired = false;
       cell.addEventListener('touchstart', e => {
+        longPressFired = false;
         longPressTimer = setTimeout(() => {
-          e.preventDefault();
+          longPressFired = true;
           onCellFlag(+cell.dataset.c, +cell.dataset.r);
-        }, 500);
+          // Vibrate feedback if supported
+          if (navigator.vibrate) navigator.vibrate(40);
+        }, 450);
       }, { passive: true });
-      cell.addEventListener('touchend', () => clearTimeout(longPressTimer));
-      cell.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+      cell.addEventListener('touchend', e => {
+        clearTimeout(longPressTimer);
+        if (longPressFired) {
+          // Block the click event that fires after touchend
+          e.preventDefault();
+        }
+      });
+      cell.addEventListener('touchmove', () => { clearTimeout(longPressTimer); longPressFired = false; });
       grid.appendChild(cell);
     }
   }
@@ -1007,7 +1040,9 @@ function processReveal(c, r, playerName) {
   const hitMine = cells.some(([cc, rr]) => board[rr][cc].mine);
 
   applyReveal(c, r, cells, playerName);
-  broadcastToGuests({ type: 'reveal_result', col: c, row: r, cells, name: playerName });
+  // Send cells WITH their adjacent values so guests can render numbers
+  const cellsWithData = cells.map(([cc, rr]) => [cc, rr, board[rr][cc].adjacent, board[rr][cc].mine]);
+  broadcastToGuests({ type: 'reveal_result', col: c, row: r, cells: cellsWithData, name: playerName });
   broadcastToGuests({ type: 'scores', scores });
   refreshScoreboard();
 
@@ -1052,8 +1087,15 @@ function processFlag(c, r, playerName) {
 }
 
 function applyReveal(c, r, cells, playerName) {
-  cells.forEach(([cc, rr]) => {
-    if (board[rr]) board[rr][cc].revealed = true;
+  cells.forEach(entry => {
+    // entry is either [cc, rr] (host local) or [cc, rr, adjacent, mine] (from network)
+    const cc = entry[0], rr = entry[1];
+    if (!board[rr] || !board[rr][cc]) return;
+    board[rr][cc].revealed = true;
+    if (entry.length >= 4) {
+      board[rr][cc].adjacent = entry[2];
+      board[rr][cc].mine = entry[3];
+    }
     renderCell(cc, rr);
   });
 }
@@ -1066,11 +1108,16 @@ function applyFlag(c, r, flagged, playerName) {
 
 function revealAllMines() {
   const { gw, gh } = gameSettings;
+  const mineCells = [];
   for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
     if (board[r][c].mine && !board[r][c].revealed) {
       board[r][c].revealed = true;
+      mineCells.push([c, r, board[r][c].adjacent, true]);
       renderCell(c, r);
     }
+  }
+  if (mineCells.length) {
+    broadcastToGuests({ type: 'reveal_result', col: -1, row: -1, cells: mineCells, name: '' });
   }
 }
 
