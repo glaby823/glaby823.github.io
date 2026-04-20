@@ -194,9 +194,9 @@
     touch-action: none;
   }
   .pan-container {
-    position: absolute;
-    transform-origin: top left;
+    transform-origin: center center;
     will-change: transform;
+    flex-shrink: 0;
   }
   .grid-wrapper { position: relative; display: inline-block; user-select: none; }
   #gameGrid {
@@ -551,10 +551,7 @@ function toggleMobileMode() {
   }
 }
 
-// Pan state
-let panX = 0, panY = 0;
-let panStartX = 0, panStartY = 0, panTouchStartX = 0, panTouchStartY = 0;
-let isPanning = false, panMoved = false;
+// Pan/zoom state (declared at module level in buildGameGrid section)
 
 /* ════════════════════════════════════════════════════════
    UTILS
@@ -945,10 +942,12 @@ function startGameHost() {
   elapsed = 0;
   document.body.classList.add('game-active');
   showScreen('gameScreen');
-  buildGameGrid();
-  refreshScoreboard();
-  if (gameSettings.timeLimit > 0) startTimer();
-  updateStatMines();
+  requestAnimationFrame(() => {
+    buildGameGrid();
+    refreshScoreboard();
+    if (gameSettings.timeLimit > 0) startTimer();
+    updateStatMines();
+  });
 }
 
 function startGameClient() {
@@ -957,10 +956,12 @@ function startGameClient() {
   elapsed = 0;
   document.body.classList.add('game-active');
   showScreen('gameScreen');
-  buildGameGrid();
-  refreshScoreboard();
-  if (gameSettings.timeLimit > 0) startTimer();
-  updateStatMines();
+  requestAnimationFrame(() => {
+    buildGameGrid();
+    refreshScoreboard();
+    if (gameSettings.timeLimit > 0) startTimer();
+    updateStatMines();
+  });
 }
 
 /* ════════════════════════════════════════════════════════
@@ -973,29 +974,24 @@ function buildGameGrid() {
   const grid = document.getElementById('gameGrid');
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
   const area = document.getElementById('gameArea');
-  const toolbar = document.getElementById('mobileToolbar');
 
-  // Available space (subtract padding)
-  const pad = 16;
-  const areaW = area.offsetWidth - pad * 2;
-  const areaH = area.offsetHeight - (toolbar && toolbar.offsetHeight > 0 ? 0 : 0) - pad * 2;
-
-  // Calculate cell size that fits the grid entirely in the visible area
+  // Base cell size: fit to area with 16px padding each side
+  const pad = 32;
+  const areaW = area.clientWidth  - pad;
+  const areaH = area.clientHeight - pad;
   const fitW = Math.floor(areaW / gw);
   const fitH = Math.floor(areaH / gh);
-  // On mobile: try to fit, but never smaller than 22px
-  // On desktop: same logic, never smaller than 18px, never bigger than 36px
-  const minCell = isMobile ? 22 : 18;
+  const minCell = 18;
   const maxCell = 36;
   const cellSize = Math.max(minCell, Math.min(maxCell, fitW, fitH));
-  const fontSize = Math.max(10, Math.floor(cellSize * 0.52));
+  const fontSize  = Math.max(10, Math.floor(cellSize * 0.52));
 
   let dynStyle = document.getElementById('dynamicCellStyle');
   if (!dynStyle) { dynStyle = document.createElement('style'); dynStyle.id = 'dynamicCellStyle'; document.head.appendChild(dynStyle); }
   dynStyle.textContent = `
-    #gameGrid .cell { width: ${cellSize}px !important; height: ${cellSize}px !important; font-size: ${fontSize}px !important; line-height: 1 !important; }
-    #gameGrid .cell.flagged::after { font-size: ${Math.max(10, fontSize - 1)}px !important; }
-    #gameGrid .cell.mine-show::after { font-size: ${Math.max(10, fontSize - 1)}px !important; }
+    #gameGrid .cell { width:${cellSize}px !important; height:${cellSize}px !important; font-size:${fontSize}px !important; line-height:1 !important; }
+    #gameGrid .cell.flagged::after { font-size:${Math.max(10,fontSize-1)}px !important; }
+    #gameGrid .cell.mine-show::after { font-size:${Math.max(10,fontSize-1)}px !important; }
   `;
 
   grid.style.gridTemplateColumns = `repeat(${gw}, ${cellSize}px)`;
@@ -1005,102 +1001,133 @@ function buildGameGrid() {
     for (let c = 0; c < gw; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
-      cell.dataset.r = r; cell.dataset.c = c;
-      if (!isMobile) {
-        cell.addEventListener('click', onCellClick);
-        cell.addEventListener('contextmenu', onCellRightClick);
-      }
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      // Always attach click/contextmenu — on mobile these won't fire due to touch-action:none on game-area
+      cell.addEventListener('click', onCellClick);
+      cell.addEventListener('contextmenu', onCellRightClick);
       grid.appendChild(cell);
     }
   }
 
-  // Center the pan container initially
-  const gridPxW = gw * cellSize + (gw - 1) * 2;
-  const gridPxH = gh * cellSize + (gh - 1) * 2;
-  panX = Math.round((area.offsetWidth - gridPxW) / 2);
-  panY = Math.round((area.offsetHeight - gridPxH) / 2);
-  // Ensure it's not negative (if grid bigger than area, start at 0)
-  panX = Math.max(0, panX);
-  panY = Math.max(0, panY);
-  applyPan();
+  // Reset transform
+  panX = 0; panY = 0; zoom = 1;
+  applyTransform();
 
-  setupPan(isMobile);
+  setupInteraction(isMobile);
 
-  if (!isMobile) {
-    const wrapper = document.getElementById('gridWrapper');
-    wrapper.addEventListener('mousemove', onMouseMove);
-  }
+  // Mouse cursor tracking (desktop)
+  document.getElementById('gridWrapper').addEventListener('mousemove', onMouseMove);
+
   renderAllCells();
 }
 
-function applyPan() {
+// Pan/zoom state — translate is in "pre-scale" space (applied as translate then scale)
+let panX = 0, panY = 0, zoom = 1;
+
+function applyTransform() {
   const container = document.getElementById('panContainer');
-  if (container) container.style.transform = `translate(${panX}px, ${panY}px)`;
+  if (!container) return;
+  container.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
 
-function setupPan(isMobile) {
+function clampPan() {
+  const container = document.getElementById('panContainer');
   const area = document.getElementById('gameArea');
-  if (!isMobile) return;
+  if (!container || !area) return;
+  const gridW = container.offsetWidth  * zoom;
+  const gridH = container.offsetHeight * zoom;
+  const areaW = area.clientWidth;
+  const areaH = area.clientHeight;
+  // Allow grid to go max half its size off-screen
+  const marginX = Math.max(gridW / 2, 60);
+  const marginY = Math.max(gridH / 2, 60);
+  panX = Math.max(-(gridW/2 + marginX/2), Math.min(gridW/2 + marginX/2, panX));
+  panY = Math.max(-(gridH/2 + marginY/2), Math.min(gridH/2 + marginY/2, panY));
+}
 
-  // Remove old listeners by replacing the element
-  const newArea = area.cloneNode(false);
-  while (area.firstChild) newArea.appendChild(area.firstChild);
-  area.parentNode.replaceChild(newArea, area);
-  newArea.id = 'gameArea';
+function setupInteraction(isMobile) {
+  const area = document.getElementById('gameArea');
 
-  let startX = 0, startY = 0, startPanX = 0, startPanY = 0, moved = false;
-  const THRESHOLD = 6;
+  // Clone to remove all previous listeners
+  const fresh = area.cloneNode(false);
+  while (area.firstChild) fresh.appendChild(area.firstChild);
+  area.parentNode.replaceChild(fresh, area);
+  fresh.id = 'gameArea';
 
-  newArea.addEventListener('touchstart', e => {
-    if (e.touches.length !== 1) return;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    startPanX = panX;
-    startPanY = panY;
-    moved = false;
+  if (!isMobile) return; // desktop: direct click on cells, no touch handling needed
+
+  let touch1 = null, touch2 = null;
+  let startPanX = 0, startPanY = 0;
+  let startDist = 0, startZoom = 1;
+  let moved = false;
+  const TAP_THRESHOLD = 8;
+
+  fresh.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      touch1 = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: e.touches[0].identifier };
+      touch2 = null;
+      startPanX = panX;
+      startPanY = panY;
+      startZoom = zoom;
+      moved = false;
+    } else if (e.touches.length === 2) {
+      touch1 = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      touch2 = { x: e.touches[1].clientX, y: e.touches[1].clientY };
+      startDist = Math.hypot(touch2.x - touch1.x, touch2.y - touch1.y);
+      startZoom = zoom;
+      startPanX = panX;
+      startPanY = panY;
+      moved = true; // treat pinch as a move (no tap)
+    }
   }, { passive: true });
 
-  newArea.addEventListener('touchmove', e => {
-    if (e.touches.length !== 1) return;
-    const dx = e.touches[0].clientX - startX;
-    const dy = e.touches[0].clientY - startY;
-    if (!moved && Math.hypot(dx, dy) > THRESHOLD) moved = true;
-    if (moved) {
-      e.preventDefault();
-      const container = document.getElementById('panContainer');
-      const areaEl = document.getElementById('gameArea');
-      const gridW = container ? container.offsetWidth : 0;
-      const gridH = container ? container.offsetHeight : 0;
-      const areaW = areaEl ? areaEl.offsetWidth : window.innerWidth;
-      const areaH = areaEl ? areaEl.offsetHeight : window.innerHeight;
-      // Allow panning with margins: grid edge can go 40px past the area edge
-      const margin = 40;
-      const minX = Math.min(0, areaW - gridW - margin);
-      const maxX = margin;
-      const minY = Math.min(0, areaH - gridH - margin);
-      const maxY = margin;
-      panX = Math.max(minX, Math.min(maxX, startPanX + dx));
-      panY = Math.max(minY, Math.min(maxY, startPanY + dy));
-      applyPan();
+  fresh.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && touch1 && !touch2) {
+      const dx = e.touches[0].clientX - touch1.x;
+      const dy = e.touches[0].clientY - touch1.y;
+      if (!moved && Math.hypot(dx, dy) > TAP_THRESHOLD) moved = true;
+      if (moved) {
+        panX = startPanX + dx;
+        panY = startPanY + dy;
+        clampPan();
+        applyTransform();
+      }
+    } else if (e.touches.length === 2 && touch1 && touch2) {
+      const t1 = e.touches[0], t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const newZoom = Math.max(0.4, Math.min(3, startZoom * (dist / startDist)));
+      zoom = newZoom;
+      // Also pan from pinch midpoint drift
+      const midX = (t1.clientX + t2.clientX) / 2;
+      const midY = (t1.clientY + t2.clientY) / 2;
+      const startMidX = (touch1.x + touch2.x) / 2;
+      const startMidY = (touch1.y + touch2.y) / 2;
+      panX = startPanX + (midX - startMidX);
+      panY = startPanY + (midY - startMidY);
+      clampPan();
+      applyTransform();
     }
   }, { passive: false });
 
-  newArea.addEventListener('touchend', e => {
-    if (moved) return;
+  fresh.addEventListener('touchend', e => {
+    if (moved) { touch1 = null; touch2 = null; return; }
+    // It's a tap
     const touch = e.changedTouches[0];
     const el = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (!el) return;
-    const cell = el.closest ? el.closest('.cell') : null;
-    if (!cell) return;
+    const cell = el && el.closest ? el.closest('.cell') : null;
+    if (!cell) { touch1 = null; return; }
     const c = +cell.dataset.c, r = +cell.dataset.r;
-    if (isNaN(c) || isNaN(r)) return;
+    if (isNaN(c) || isNaN(r)) { touch1 = null; return; }
+
     if (mobileMode === 'flag') {
       onCellFlag(c, r);
       if (navigator.vibrate) navigator.vibrate(30);
     } else {
-      if (!gameActive || gameOver) return;
-      if (!board[r] || !board[r][c]) return;
-      if (board[r][c].flagged || board[r][c].revealed) return;
+      if (!gameActive || gameOver) { touch1 = null; return; }
+      if (!board[r] || !board[r][c]) { touch1 = null; return; }
+      if (board[r][c].flagged || board[r][c].revealed) { touch1 = null; return; }
       if (isHost) {
         if (firstClick) {
           firstClick = false;
@@ -1112,6 +1139,7 @@ function setupPan(isMobile) {
         if (hostConn) hostConn.send({ type: 'reveal', col: c, row: r, name: myName });
       }
     }
+    touch1 = null; touch2 = null;
   }, { passive: true });
 }
 
@@ -1285,6 +1313,7 @@ function revealAllMines() {
 }
 
 function checkWin() {
+  if (firstClick) return false; // board not generated yet
   const { gw, gh } = gameSettings;
   for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
     if (!board[r][c].mine && !board[r][c].revealed) return false;
