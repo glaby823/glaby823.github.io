@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake P2P – Jeu</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+:root{--bg:#080c14;--panel:#0d1420;--border:#1a2840;--accent:#00ff88;--accent2:#0088ff;--warn:#ffaa00;--danger:#ff4444;--text:#c8d8e8;--muted:#4a6080;}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;display:flex;flex-direction:column;}
+header{border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:10px;background:rgba(13,20,32,.97);flex-shrink:0;height:44px;}
+.logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:.95rem;color:var(--accent);letter-spacing:2px;}
+.logo span{color:var(--accent2);}
+a.back{color:var(--muted);text-decoration:none;font-size:.76rem;transition:.2s;cursor:pointer;}
+a.back:hover{color:var(--text);}
+.hud{display:flex;gap:14px;margin-left:auto;font-size:.76rem;align-items:center;}
+.hud b{color:var(--accent);}
+#timerEl{color:var(--warn);font-weight:700;}
+#statusEl{color:var(--accent2);font-size:.7rem;}
+.main{display:flex;flex:1;overflow:hidden;min-height:0;}
+.game-area{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+canvas{display:block;border:1px solid var(--border);border-radius:3px;}
+#wallBorder{position:absolute;inset:0;pointer-events:none;border:3px solid var(--danger);border-radius:3px;opacity:0;transition:.3s;z-index:5;}
+#wallBorder.active{opacity:.55;}
+/* Sidebar */
+.sidebar{width:220px;flex-shrink:0;border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;}
+.sb-sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sb-title{font-family:'Orbitron',sans-serif;font-size:.62rem;color:var(--muted);letter-spacing:2px;margin-bottom:7px;}
+.prow{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:.74rem;}
+.pdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.pname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pscore{color:var(--accent);}
+.pdead{opacity:.3;text-decoration:line-through;}
+.sscroll{flex:1;overflow-y:auto;padding:11px 13px;}
+.field{margin-bottom:9px;}
+.field label{display:block;font-size:.66rem;color:var(--muted);margin-bottom:3px;}
+.field input[type=number]{width:100%;background:rgba(0,255,136,.06);border:1px solid var(--border);border-radius:5px;padding:4px 7px;color:var(--accent);font-family:inherit;font-size:.78rem;outline:none;transition:.15s;}
+.field input[type=number]:focus{border-color:var(--accent);}
+.field input:disabled{opacity:.4;cursor:not-allowed;}
+.btn{display:block;width:100%;padding:7px;border:none;border-radius:6px;font-family:inherit;font-size:.76rem;cursor:pointer;font-weight:700;letter-spacing:1px;transition:.15s;margin-bottom:5px;text-align:center;}
+.btn-primary{background:var(--accent);color:#000;}.btn-primary:hover{background:#00cc70;}
+.btn-green{background:linear-gradient(135deg,#00cc66,#00aa44);color:#000;font-size:.82rem;padding:9px;}.btn-green:hover{background:linear-gradient(135deg,#00ff88,#00cc55);}
+.btn-outline{background:transparent;border:1px solid var(--accent2);color:var(--accent2);}
+.ratio-row{display:flex;gap:4px;margin-bottom:7px;}
+.ratio-row .btn{flex:1;margin-bottom:0;font-size:.68rem;padding:5px 3px;}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+.toggle-row>label{font-size:.66rem;color:var(--muted);}
+.tog{position:relative;width:36px;height:19px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;}
+.tog-sl{position:absolute;inset:0;background:var(--border);border-radius:20px;cursor:pointer;transition:.2s;}
+.tog-sl:before{content:'';position:absolute;width:13px;height:13px;left:3px;top:3px;background:#666;border-radius:50%;transition:.2s;}
+.tog input:checked+.tog-sl{background:var(--accent);}
+.tog input:checked+.tog-sl:before{transform:translateX(17px);background:#000;}
+.tog input:disabled+.tog-sl{opacity:.4;cursor:not-allowed;}
+/* Overlays */
+.ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;background:rgba(8,12,20,.88);backdrop-filter:blur(5px);z-index:20;}
+.ov.hidden{display:none;}
+#ovCD{background:rgba(8,12,20,.5);backdrop-filter:blur(1px);}
+.ov-h1{font-family:'Orbitron',sans-serif;font-size:1.7rem;font-weight:900;text-align:center;}
+.ov-sub{color:var(--muted);font-size:.83rem;text-align:center;max-width:320px;line-height:1.6;}
+.cd-num{font-family:'Orbitron',sans-serif;font-size:5.5rem;font-weight:900;color:var(--warn);text-shadow:0 0 40px rgba(255,170,0,.7);animation:pop .6s ease-out;}
+@keyframes pop{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
+.lp-list{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:9px 13px;min-width:240px;max-width:320px;}
+.lp-row{display:flex;align-items:center;gap:7px;padding:4px 0;font-size:.8rem;border-bottom:1px solid rgba(26,40,64,.6);}
+.lp-row:last-child{border-bottom:none;}
+.lp-dot{width:9px;height:9px;border-radius:50%;}
+.lp-crown{font-size:.78rem;margin-left:auto;}
+.go-tbl{background:rgba(13,20,32,.9);border:1px solid var(--border);border-radius:10px;padding:16px 20px;min-width:260px;}
+.go-row{display:flex;align-items:center;gap:9px;padding:5px 0;border-bottom:1px solid rgba(26,40,64,.6);font-size:.83rem;}
+.go-row:last-child{border-bottom:none;}
+.go-rank{width:24px;color:var(--warn);}.go-name{flex:1;}.go-pts{color:var(--accent);}
+/* D-pad */
+.dpad{display:none;}
+@media(max-width:700px){
+  .sidebar{display:none;}
+  /* D-pad centré en bas, surélevé de 20px */
+  .dpad{
+    display:grid;
+    grid-template-columns:60px 60px 60px;
+    grid-template-rows:60px 60px;
+    gap:5px;
+    position:fixed;
+    bottom:28px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:50;
+  }
+  .dpad button{
+    background:rgba(13,20,32,.88);
+    border:2px solid rgba(0,255,136,.35);
+    border-radius:10px;
+    color:var(--accent);
+    font-size:1.4rem;
+    cursor:pointer;
+    touch-action:manipulation;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .dpad button:active{background:rgba(0,255,136,.2);border-color:var(--accent);}
+  .dpad .up{grid-column:2;grid-row:1;}
+  .dpad .left{grid-column:1;grid-row:2;}
+  .dpad .down{grid-column:2;grid-row:2;}
+  .dpad .right{grid-column:3;grid-row:2;}
+}
+#notifStack{position:fixed;top:52px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;z-index:200;pointer-events:none;}
+.notif{font-size:.8rem;padding:8px 16px;border-radius:8px;opacity:0;white-space:nowrap;transform:translateY(-8px);transition:.25s;border:1px solid;max-width:90vw;}
+.notif.show{opacity:1;transform:translateY(0);}
+.notif-info{background:rgba(0,136,255,.18);border-color:rgba(0,136,255,.5);color:#88ccff;}
+.notif-success{background:rgba(0,255,136,.15);border-color:rgba(0,255,136,.45);color:#00ff88;}
+.notif-warn{background:rgba(255,170,0,.15);border-color:rgba(255,170,0,.45);color:#ffaa00;}
+.notif-danger{background:rgba(255,68,68,.15);border-color:rgba(255,68,68,.45);color:#ff6666;}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" onclick="leave()">← Quitter</a>
+  <div class="logo">🐍 <span>P2P</span></div>
+  <div class="hud">
+    Score&nbsp;<b id="myScore">0</b>&nbsp;&nbsp;
+    Joueurs&nbsp;<b id="pCount">0</b>&nbsp;&nbsp;
+    <span id="timerEl"></span>
+    <span id="statusEl">DÉMARRAGE</span>
+  </div>
+</header>
+<div class="main">
+  <div class="game-area" id="ga">
+    <canvas id="c"></canvas>
+    <div id="wallBorder"></div>
+
+    <!-- Attente -->
+    <div class="ov" id="ovWait">
+      <div class="ov-h1" style="color:var(--accent)">EN ATTENTE</div>
+      <div class="ov-sub">Joueurs dans le lobby :</div>
+      <div class="lp-list" id="lpList"></div>
+      <div id="hostArea"></div>
+      <div class="ov-sub" id="waitHint" style="font-size:.7rem"></div>
+    </div>
+
+    <!-- Countdown -->
+    <div class="ov hidden" id="ovCD">
+      <div class="ov-sub">Partie dans</div>
+      <div class="cd-num" id="cdNum">3</div>
+    </div>
+
+    <!-- Mort -->
+    <div class="ov hidden" id="ovDead">
+      <div class="ov-h1" style="color:var(--danger)">ÉLIMINÉ</div>
+      <div class="ov-sub">Vous observez...</div>
+    </div>
+
+    <!-- Game over -->
+    <div class="ov hidden" id="ovGO">
+      <div class="ov-h1" style="color:var(--warn)">PARTIE TERMINÉE</div>
+      <div class="go-tbl" id="goTbl"></div>
+      <div class="ov-sub" style="font-size:.7rem">Nouvelle partie dans 8s...</div>
+    </div>
+
+    <!-- Connecting -->
+    <div class="ov" id="ovConn">
+      <div class="ov-h1" style="color:var(--accent2)">CONNEXION...</div>
+      <div class="ov-sub" id="connMsg">Initialisation P2P...</div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sb-sec">
+      <div class="sb-title">SCORES</div>
+      <div id="scoreList"></div>
+    </div>
+    <div class="sscroll">
+      <div class="sb-title">PARAMÈTRES</div>
+      <div id="settFields"></div>
+      <div id="hostBtns" style="display:none">
+        <button class="btn btn-primary" onclick="pushSettings()">✓ Appliquer</button>
+        <button class="btn btn-green"   onclick="hostStart()">▶ Lancer</button>
+      </div>
+      <div id="guestHint" style="display:none;font-size:.66rem;color:var(--muted);margin-top:5px">Seul l'hôte modifie.</div>
+    </div>
+  </div>
+</div>
+<div class="dpad" id="dpad">
+  <button class="up"    id="btn-up">▲</button>
+  <button class="left"  id="btn-left">◄</button>
+  <button class="down"  id="btn-down">▼</button>
+  <button class="right" id="btn-right">►</button>
+</div>
+<div id="notifStack"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script>
+// Firebase Realtime Database — registre public des lobbies
+// Remplacez ces valeurs par votre propre projet Firebase gratuit si vous voulez
+// (Créer sur https://console.firebase.google.com → Realtime Database → mode test)
+const FIREBASE_CFG = {
+  apiKey: "238847906143",
+  databaseURL: "https://snake-p2p-dca09-default-rtdb.europe-west1.firebasedatabase.app",
+};
+// ─────────────────────────────────────────────────────────────
+// REGISTRE DE LOBBIES via Firebase Realtime Database
+// Chemin : games/snake/lobbies/{peerId}
+// Chaque lobby = {id, name, host, players, maxPlayers, gw, gh, status, ts}
+// TTL : les entrées > 15s sans heartbeat sont ignorées côté client
+// ─────────────────────────────────────────────────────────────
+let fbApp = null, fbDb = null, fbRef = null;
+
+function initFirebase() {
+  try {
+    fbApp = firebase.initializeApp(FIREBASE_CFG);
+    fbDb  = firebase.database();
+    fbRef = fbDb.ref('games/snake/lobbies');
+    return true;
+  } catch(e) {
+    console.warn('Firebase non disponible, fallback localStorage:', e);
+    return false;
+  }
+}
+
+function fbSet(id, data) {
+  if (fbRef) {
+    fbRef.child(id).set({...data, ts: firebase.database.ServerValue.TIMESTAMP});
+  } else {
+    // fallback localStorage
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    all[id] = {...data, ts: Date.now()};
+    localStorage.setItem('snakep2p_v4', JSON.stringify(all));
+  }
+}
+
+function fbRemove(id) {
+  if (fbRef) fbRef.child(id).remove();
+  else {
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    delete all[id]; localStorage.setItem('snakep2p_v4', JSON.stringify(all));
+  }
+}
+
+function fbOnce(cb) {
+  if (fbRef) {
+    fbRef.once('value', snap => {
+      const val = snap.val() || {};
+      // Filtrer TTL > 20s
+      const now = Date.now();
+      cb(Object.fromEntries(Object.entries(val).filter(([,l]) => now - (l.ts||0) < 20000)));
+    });
+  } else {
+    const all = JSON.parse(localStorage.getItem('snakep2p_v4')||'{}');
+    const now = Date.now();
+    cb(Object.fromEntries(Object.entries(all).filter(([,l]) => now - (l.ts||0) < 20000)));
+  }
+}
+
+function fbListen(cb) {
+  if (fbRef) {
+    fbRef.on('value', snap => {
+      const val = snap.val() || {};
+      const now = Date.now();
+      cb(Object.fromEntries(Object.entries(val).filter(([,l]) => now - (l.ts||0) < 20000)));
+    });
+  }
+}
+</script>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════
+// CONFIGURATION (reprise de sessionStorage)
+// ═══════════════════════════════════════════════════════
+const IS_HOST   = sessionStorage.getItem('snake_isHost') === '1';
+const MY_NAME   = sessionStorage.getItem('snake_name')   || localStorage.getItem('snakeName') || 'Joueur';
+const TARGET_ID = sessionStorage.getItem('snake_targetId') || '';
+const LS_KEY    = 'snakep2p_v4';
+const COLORS    = ['#00ff88','#ff4444','#4488ff','#ffaa00','#ff44ff','#44ffff','#ffff44','#ff8800','#ff66aa','#66ffcc'];
+
+if (!IS_HOST && !TARGET_ID) { window.location.href = 'index.html'; }
+
+// ═══════════════════════════════════════════════════════
+// ÉTAT GLOBAL
+// ═══════════════════════════════════════════════════════
+let peer = null, myPeerId = null;
+let hostConn = null;                  // connexion vers l'hôte (côté client)
+let clientConns = {};                 // {peerId: DataConnection} (côté hôte)
+
+// État jeu — géré uniquement par l'hôte, diffusé aux clients
+let gs = {
+  players: {},   // {peerId: {name,color,body,dir,nextDir,score,alive}}
+  food:    [],
+  status:  'waiting',  // waiting | countdown | playing | finished
+  tick:    0,
+  startTs: 0,
+};
+let cfg = { gw:25, gh:18, food:5, maxPl:8, speed:12, duration:0, wrap:true };
+let gameTimer = null;
+
+// Rendu
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const ga     = document.getElementById('ga');
+let CELL=20, gridW=25, gridH=18, lastSnap=null;
+let myAlive=true, deadShown=false;
+let myPeerId_render = null;  // mon ID pour le rendu
+
+// ═══════════════════════════════════════════════════════
+// CANVAS RESIZE
+// ═══════════════════════════════════════════════════════
+function resize() {
+  const W=ga.clientWidth-2, H=ga.clientHeight-2;
+  CELL = Math.max(8, Math.min(40, Math.floor(W/gridW), Math.floor(H/gridH)));
+  canvas.width=gridW*CELL; canvas.height=gridH*CELL;
+}
+window.addEventListener('resize', resize);
+
+// ═══════════════════════════════════════════════════════
+// PEER INIT
+// ═══════════════════════════════════════════════════════
+function initPeer(cb) {
+  initFirebase();
+  setConnMsg('Connexion au réseau P2P...');
+  peer = new Peer({ config:{ iceServers:[
+    {urls:'stun:stun.l.google.com:19302'},
+    {urls:'stun:stun2.l.google.com:19302'},
+  ]}});
+  peer.on('open', id => { myPeerId = id; myPeerId_render = id; cb(id); });
+  peer.on('error', e => {
+    if (e.type === 'peer-unavailable') {
+      notif("Hôte introuvable", 'danger');
+      setTimeout(() => window.location.href='index.html', 2500);
+      return;
+    }
+    notif('Erreur P2P : ' + e.type, 'danger');
+  });
+  peer.on('disconnected', () => {
+    notif('P2P déconnecté, reconnexion...', 'warn');
+    setTimeout(() => peer.reconnect(), 1500);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// MODE HÔTE
+// ═══════════════════════════════════════════════════════
+function startHost(id) {
+  setConnMsg('Création du lobby...');
+  myPeerId = id;
+
+  // M'ajouter comme premier joueur
+  addPlayer(id, MY_NAME);
+
+  // Écouter les connexions entrantes
+  peer.on('connection', conn => {
+    conn.on('open', () => {
+      if (conn.metadata === 'ping') {
+        // Répondre au ping de découverte
+        conn.send(JSON.stringify({type:'pong', info: getLobbyInfo()}));
+        conn.close();
+        return;
+      }
+      handleNewClient(conn);
+    });
+    conn.on('error', () => {});
+  });
+
+  showOverlay('wait');
+  setStatus('HÔTE');
+  refreshHostUI();
+  announceToLS();
+  notif('Lobby créé ! Partagez votre ID : ' + id.slice(0,8)+'...', 'success', 5000);
+}
+
+function handleNewClient(conn) {
+  const pid = conn.peer;
+  conn.on('data', raw => {
+    try { onClientMsg(pid, JSON.parse(raw), conn); } catch(e){}
+  });
+  conn.on('close', () => onClientLeft(pid));
+  conn.on('error', () => onClientLeft(pid));
+}
+
+function onClientMsg(pid, msg, conn) {
+  if (msg.t === 'join') {
+    if (Object.keys(gs.players).length >= cfg.maxPl) {
+      conn.send(JSON.stringify({t:'kick', reason:'Lobby plein'})); conn.close(); return;
+    }
+    if (gs.status !== 'waiting') {
+      conn.send(JSON.stringify({t:'kick', reason:'Partie en cours'})); conn.close(); return;
+    }
+    clientConns[pid] = conn;
+    addPlayer(pid, msg.name || 'Joueur');
+    // Envoyer l'état complet au nouveau
+    conn.send(JSON.stringify({t:'welcome', cfg, players: getSnap().players, myId: pid}));
+    bcast({t:'pjoin', name:gs.players[pid].name, pid, players:getPublicPlayers()});
+    refreshHostUI();
+    announceToLS();
+    notif('+ ' + gs.players[pid].name + ' a rejoint', 'info', 2500);
+
+  } else if (msg.t === 'dir') {
+    const p = gs.players[pid];
+    if (p && p.alive) {
+      const [dx,dy]=msg.d, [cx,cy]=p.dir;
+      if (!(dx===-cx && dy===-cy)) p.nextDir=[dx,dy];
+    }
+  }
+}
+
+function onClientLeft(pid) {
+  if (!gs.players[pid]) return;
+  const name = gs.players[pid].name;
+  delete gs.players[pid];
+  delete clientConns[pid];
+  notif('← ' + name + ' a quitté', 'warn', 3000);
+  if (gs.status === 'waiting') {
+    refreshHostUI();
+    bcast({t:'pleave', pid, name, players:getPublicPlayers()});
+    announceToLS();
+  } else if (gs.status === 'playing') {
+    bcast({t:'pleave', pid, name});
+    checkEnd();
+  }
+}
+
+// ── Joueurs ──────────────────────────────────────────────
+function addPlayer(pid, name) {
+  const idx = Object.keys(gs.players).length;
+  const color = COLORS[idx % COLORS.length];
+  const pos = spawnPos();
+  gs.players[pid] = {
+    name, color,
+    body: [pos, [pos[0]-1,pos[1]], [pos[0]-2,pos[1]]],
+    dir:[1,0], nextDir:[1,0], score:0, alive:true
+  };
+}
+
+function spawnPos() {
+  // Toutes les cellules occupées par tous les serpents existants
+  const occ = new Set(Object.values(gs.players).flatMap(p=>p.body.map(s=>s[0]+','+s[1])));
+  // Essayer de trouver une position où la tête ET les 2 segments suivants sont libres
+  for (let i=0;i<1000;i++){
+    const x=3+Math.floor(Math.random()*(Math.max(1,cfg.gw-6)));
+    const y=3+Math.floor(Math.random()*(Math.max(1,cfg.gh-6)));
+    // Vérifier la tête + 2 segments derrière (corps initial de 3 cases)
+    const clear = !occ.has(x+','+y)
+               && !occ.has((x-1)+','+y)
+               && !occ.has((x-2)+','+y);
+    if(clear) return [x,y];
+  }
+  // Fallback : chercher n'importe quelle case libre
+  for(let x=0;x<cfg.gw;x++) for(let y=0;y<cfg.gh;y++)
+    if(!occ.has(x+','+y)) return [x,y];
+  return [0,0];
+}
+
+function getPublicPlayers() {
+  return Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,{name:p.name,color:p.color,score:p.score,alive:p.alive}]));
+}
+
+// ── Nourriture ───────────────────────────────────────────
+function makeFood() {
+  const occ = new Set([
+    ...Object.values(gs.players).flatMap(p=>p.body.map(s=>s[0]+','+s[1])),
+    ...gs.food.map(f=>f[0]+','+f[1])
+  ]);
+  for (let i=0;i<500;i++){
+    const x=Math.floor(Math.random()*cfg.gw), y=Math.floor(Math.random()*cfg.gh);
+    if (!occ.has(x+','+y)) return [x,y];
+  }
+  return null;
+}
+
+function initFood() {
+  gs.food=[];
+  for (let i=0;i<cfg.food;i++){const f=makeFood();if(f)gs.food.push(f);}
+}
+
+// ── Countdown & partie ───────────────────────────────────
+function hostStart() {
+  if (gs.status !== 'waiting') return;
+  startCountdown();
+}
+
+function startCountdown() {
+  gs.status = 'countdown';
+  // Réinitialiser joueurs
+  Object.keys(gs.players).forEach(pid => {
+    const pos = spawnPos();
+    gs.players[pid].body=[pos,[pos[0]-1,pos[1]],[pos[0]-2,pos[1]]];
+    gs.players[pid].dir=[1,0]; gs.players[pid].nextDir=[1,0];
+    gs.players[pid].score=0; gs.players[pid].alive=true;
+  });
+  initFood();
+
+  let n=3;
+  function doCount() {
+    // Diffuser + afficher localement
+    const snap = buildSnap();
+    bcastAndSelf({t:'cd', n, snap});
+    showCD(n, snap);
+    if (n > 1) { n--; setTimeout(doCount, 1000); }
+    else { setTimeout(startPlaying, 1000); }
+  }
+  doCount();
+}
+
+function startPlaying() {
+  gs.status='playing'; gs.startTs=Date.now(); gs.tick=0;
+  bcastAndSelf({t:'go'});
+  showOverlay('none');
+  setStatus('▶ EN JEU');
+  const interval = 1000/Math.max(1,cfg.speed);
+  gameTimer = setInterval(gameTick, interval);
+}
+
+function gameTick() {
+  tick();
+  gs.tick++;
+  const snap=buildSnap();
+  bcastAndSelf({t:'state', snap});
+  checkEnd();
+  if (cfg.duration>0 && (Date.now()-gs.startTs)/1000>=cfg.duration) endGame();
+}
+
+function tick() {
+  const heads={};
+  for (const [pid,p] of Object.entries(gs.players)){
+    if(!p.alive) continue;
+    p.dir=[...p.nextDir];
+    let nx=p.body[0][0]+p.dir[0], ny=p.body[0][1]+p.dir[1];
+    if(cfg.wrap){
+      nx=((nx%cfg.gw)+cfg.gw)%cfg.gw;
+      ny=((ny%cfg.gh)+cfg.gh)%cfg.gh;
+    }
+    heads[pid]=[nx,ny];
+  }
+  for (const [pid,p] of Object.entries(gs.players)){
+    if(!p.alive||!heads[pid]) continue;
+    const [nx,ny]=heads[pid];
+    if(!cfg.wrap&&(nx<0||nx>=cfg.gw||ny<0||ny>=cfg.gh)){p.alive=false;continue;}
+    const bSet=new Set(p.body.slice(0,-1).map(s=>s[0]+','+s[1]));
+    if(bSet.has(nx+','+ny)){p.alive=false;continue;}
+    const ateIdx=gs.food.findIndex(f=>f[0]===nx&&f[1]===ny);
+    p.body.unshift([nx,ny]);
+    if(ateIdx>=0){
+      p.score+=10; gs.food.splice(ateIdx,1);
+      const nf=makeFood(); if(nf) gs.food.push(nf);
+    } else { p.body.pop(); }
+  }
+  const bodyMap={};
+  for(const [pid,p] of Object.entries(gs.players)) if(p.alive) bodyMap[pid]=new Set(p.body.map(s=>s[0]+','+s[1]));
+  for(const [pid,p] of Object.entries(gs.players)){
+    if(!p.alive) continue;
+    const h=p.body[0][0]+','+p.body[0][1];
+    for(const [opid,ob] of Object.entries(bodyMap)){
+      if(opid===pid) continue;
+      if(ob.has(h)){p.alive=false;break;}
+    }
+  }
+}
+
+function checkEnd() {
+  if (Object.keys(gs.players).length===0) return;
+  if (Object.values(gs.players).every(p=>!p.alive)) endGame();
+}
+
+function endGame() {
+  if (gs.status==='finished') return;
+  if (gameTimer){clearInterval(gameTimer);gameTimer=null;}
+  gs.status='finished';
+  const scores=Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,p.score]));
+  const names =Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,p.name]));
+  bcastAndSelf({t:'over', scores, names});
+  announceToLS();
+  setTimeout(restartLobby, 8000);
+}
+
+function restartLobby() {
+  if (gameTimer){clearInterval(gameTimer);gameTimer=null;}
+  gs.status='waiting'; gs.food=[]; gs.tick=0;
+  Object.keys(gs.players).forEach((pid,i)=>{
+    const pos=spawnPos();
+    gs.players[pid].body=[pos,[pos[0]-1,pos[1]],[pos[0]-2,pos[1]]];
+    gs.players[pid].dir=[1,0];gs.players[pid].nextDir=[1,0];
+    gs.players[pid].score=0;gs.players[pid].alive=true;
+  });
+  bcastAndSelf({t:'restart', players:getPublicPlayers()});
+  refreshHostUI();
+  announceToLS();
+  notif('🔄 Nouvelle partie !','success',3000);
+}
+
+// ── Diffusion ────────────────────────────────────────────
+function bcast(msg) {
+  const raw=JSON.stringify(msg);
+  for (const conn of Object.values(clientConns)) {
+    try{conn.send(raw);}catch(e){}
+  }
+}
+function bcastAndSelf(msg) {
+  bcast(msg);
+  onHostMsg(msg);  // traiter localement pour l'hôte
+}
+
+// ── Lobby registry ───────────────────────────────────────
+function getLobbyInfo() {
+  return {
+    id: myPeerId, name: MY_NAME+"'s game", host: MY_NAME,
+    players: Object.keys(gs.players).length, maxPlayers: cfg.maxPl,
+    gw: cfg.gw, gh: cfg.gh, status: gs.status, ts: Date.now()
+  };
+}
+function announceToLS() {
+  if (!myPeerId) return;
+  if (gs.status==='finished'&&Object.keys(gs.players).length===0) {
+    fbRemove(myPeerId);
+  } else {
+    fbSet(myPeerId, getLobbyInfo());
+  }
+}
+
+// ── Snapshot ─────────────────────────────────────────────
+function buildSnap() {
+  const tl = cfg.duration>0 ? Math.max(0,cfg.duration-Math.round((Date.now()-gs.startTs)/1000)) : -1;
+  return {
+    players: Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,{
+      name:p.name,color:p.color,body:p.body,dir:p.dir,score:p.score,alive:p.alive
+    }])),
+    food:gs.food, tl
+  };
+}
+function getSnap() { return buildSnap(); }
+
+// ═══════════════════════════════════════════════════════
+// MODE CLIENT
+// ═══════════════════════════════════════════════════════
+function startClient(id) {
+  myPeerId = id; myPeerId_render = id;
+  setConnMsg('Connexion à l\'hôte...');
+  const conn = peer.connect(TARGET_ID, {reliable:true, metadata:'player'});
+  hostConn = conn;
+  const to = setTimeout(()=>{
+    notif("L'hôte ne répond pas", 'danger');
+    setTimeout(()=>window.location.href='index.html',2000);
+  },8000);
+  conn.on('open',()=>{
+    clearTimeout(to);
+    setConnMsg('En attente...');
+    conn.send(JSON.stringify({t:'join', name:MY_NAME}));
+  });
+  conn.on('data',raw=>{
+    try{onClientData(JSON.parse(raw));}catch(e){}
+  });
+  conn.on('close',()=>{
+    notif('Connexion perdue','danger');
+    setTimeout(()=>window.location.href='index.html',2000);
+  });
+  conn.on('error',()=>{
+    notif('Erreur connexion','danger');
+    setTimeout(()=>window.location.href='index.html',2000);
+  });
+}
+
+function onClientData(msg) {
+  if (msg.t==='kick') { notif(msg.reason,'danger'); setTimeout(()=>window.location.href='index.html',2000); return; }
+  if (msg.t==='welcome') {
+    cfg=msg.cfg; gridW=cfg.gw; gridH=cfg.gh; resize();
+    renderSettings(false);
+    updateWallBorder(cfg.wrap);
+    // Reconstruire lastSnap depuis players
+    lastSnap={players:msg.players, food:[], tl:-1};
+    updateLobbyList(msg.players);
+    showOverlay('wait');
+    setStatus('LOBBY');
+    notif('Connecté !','success',2000);
+    return;
+  }
+  onHostMsg(msg);
+}
+
+// ═══════════════════════════════════════════════════════
+// GESTIONNAIRE D'ÉVÉNEMENTS COMMUN (hôte reçoit via onHostMsg, client via onClientData→onHostMsg)
+// ═══════════════════════════════════════════════════════
+function onHostMsg(msg) {
+  if (msg.t==='cd') {
+    lastSnap=msg.snap;
+    showOverlay('cd');
+    const el=document.getElementById('cdNum');
+    el.textContent=msg.n; el.style.animation='none'; void el.offsetWidth; el.style.animation='pop .6s ease-out';
+
+  } else if (msg.t==='go') {
+    showOverlay('none');
+    setStatus('▶ EN JEU');
+    myAlive=true; deadShown=false;
+
+  } else if (msg.t==='state') {
+    lastSnap=msg.snap;
+    updateHUD(msg.snap);
+    renderScores(msg.snap.players);
+
+  } else if (msg.t==='pjoin') {
+    updateLobbyList(msg.players);
+    notif('+ '+msg.name+' a rejoint','info',2000);
+
+  } else if (msg.t==='pleave') {
+    if (msg.players) updateLobbyList(msg.players);
+    notif('← '+msg.name+' a quitté','warn',2500);
+
+  } else if (msg.t==='over') {
+    showOverlay('go');
+    renderGO(msg.scores, msg.names);
+    setStatus('TERMINÉ');
+
+  } else if (msg.t==='restart') {
+    lastSnap=null; myAlive=true; deadShown=false;
+    updateLobbyList(msg.players);
+    showOverlay('wait');
+    setStatus(IS_HOST?'HÔTE':'LOBBY');
+    notif('🔄 Nouvelle partie !','success',3000);
+    if (IS_HOST) refreshHostUI();
+
+  } else if (msg.t==='cfg') {
+    cfg=msg.cfg; gridW=cfg.gw; gridH=cfg.gh; resize();
+    renderSettings(!IS_HOST ? false : true);
+    updateWallBorder(cfg.wrap);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// CONTRÔLES
+// ═══════════════════════════════════════════════════════
+function dir(dx,dy) {
+  if (IS_HOST) {
+    const p=gs.players[myPeerId];
+    if(p&&p.alive){const[cx,cy]=p.dir;if(!(dx===-cx&&dy===-cy))p.nextDir=[dx,dy];}
+  } else {
+    hostConn?.send(JSON.stringify({t:'dir',d:[dx,dy]}));
+  }
+}
+document.addEventListener('keydown',e=>{
+  const map={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
+             KeyW:[0,-1],KeyS:[0,1],KeyA:[-1,0],KeyD:[1,0]};
+  const d=map[e.code];
+  if(d){e.preventDefault();dir(d[0],d[1]);}
+});
+
+// ── D-pad tactile ── (touchstart sans délai, preventDefault empêche le scroll)
+(function(){
+  const btns={
+    'btn-up':   [0,-1], 'btn-left': [-1,0],
+    'btn-down': [0, 1], 'btn-right':[1, 0],
+  };
+  for(const[id,[dx,dy]] of Object.entries(btns)){
+    const el=document.getElementById(id);
+    if(!el) continue;
+    el.addEventListener('touchstart', e=>{
+      e.preventDefault();
+      dir(dx,dy);
+    },{passive:false});
+    // Fallback click pour les appareils sans touch
+    el.addEventListener('click', e=>{
+      e.preventDefault();
+      dir(dx,dy);
+    });
+  }
+})();
+
+// ═══════════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════════
+const OVS = {wait:'ovWait',cd:'ovCD',dead:'ovDead',go:'ovGO',conn:'ovConn'};
+function showOverlay(name) {
+  Object.values(OVS).forEach(id=>document.getElementById(id).classList.add('hidden'));
+  if(name&&OVS[name]) document.getElementById(OVS[name]).classList.remove('hidden');
+}
+
+function setStatus(txt) { document.getElementById('statusEl').textContent=txt; }
+function setConnMsg(txt) { document.getElementById('connMsg').textContent=txt; }
+
+function updateLobbyList(players) {
+  const el=document.getElementById('lpList');
+  const entries=Object.entries(players);
+  if(!entries.length){el.innerHTML='<div style="color:var(--muted);font-size:.76rem">Personne...</div>';return;}
+  el.innerHTML=entries.map(([pid,p])=>`
+    <div class="lp-row">
+      <div class="lp-dot" style="background:${p.color||'#888'}"></div>
+      <span style="font-size:.78rem">${esc(p.name)}</span>
+      ${pid===TARGET_ID||pid===myPeerId&&IS_HOST?'<span class="lp-crown">👑</span>':''}
+    </div>`).join('');
+  document.getElementById('pCount').textContent=entries.length;
+}
+
+function refreshHostUI() {
+  updateLobbyList(getPublicPlayers());
+  document.getElementById('hostBtns').style.display='block';
+  document.getElementById('guestHint').style.display='none';
+  document.getElementById('hostArea').innerHTML=
+    '<button onclick="hostStart()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:10px 24px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;margin-top:4px">▶ Lancer la partie</button>';
+  document.getElementById('waitHint').textContent='Vous êtes l\'hôte. Lancez quand vous êtes prêt !';
+}
+
+function updateHUD(snap) {
+  const me=snap.players[myPeerId];
+  if(me){
+    document.getElementById('myScore').textContent=me.score;
+    if(!me.alive&&myAlive){
+      myAlive=false;
+      if(!deadShown){deadShown=true;showOverlay('dead');setTimeout(()=>{if(gs.status==='playing'||lastSnap?.status==='playing')showOverlay('none');},2500);}
+    }
+  }
+  const tl=snap.tl;
+  const te=document.getElementById('timerEl');
+  if(tl>=0){te.textContent='⏱ '+tl+'s';te.style.color=tl<15?'var(--danger)':'var(--warn)';}
+  else te.textContent='';
+  document.getElementById('pCount').textContent=Object.keys(snap.players).length;
+  renderScores(snap.players);
+}
+
+function renderScores(players) {
+  document.getElementById('scoreList').innerHTML=Object.entries(players).sort((a,b)=>b[1].score-a[1].score).map(([pid,p])=>`
+    <div class="prow ${!p.alive?'pdead':''}">
+      <div class="pdot" style="background:${p.color}"></div>
+      <div class="pname">${pid===myPeerId?'▶ ':''}${esc(p.name)}</div>
+      <div class="pscore">${p.score}</div>
+    </div>`).join('');
+}
+
+function renderGO(scores, names) {
+  const m=['🥇','🥈','🥉'];
+  document.getElementById('goTbl').innerHTML=
+    '<div style="font-family:Orbitron,sans-serif;font-size:.7rem;color:var(--muted);letter-spacing:2px;margin-bottom:10px;text-align:center">RÉSULTATS</div>'+
+    Object.entries(scores).sort((a,b)=>b[1]-a[1]).map(([pid,pts],i)=>`
+      <div class="go-row">
+        <div class="go-rank">${m[i]||'#'+(i+1)}</div>
+        <div class="go-name" style="color:${pid===myPeerId?'var(--warn)':'var(--text)'}">${esc(names[pid]||'?')}</div>
+        <div class="go-pts">${pts} pts</div>
+      </div>`).join('');
+}
+
+function showCD(n, snap) {
+  lastSnap=snap;
+  showOverlay('cd');
+  const el=document.getElementById('cdNum');
+  el.textContent=n; el.style.animation='none'; void el.offsetWidth; el.style.animation='pop .6s ease-out';
+}
+
+// ── Paramètres ───────────────────────────────────────────
+const FLDS=[
+  {k:'gw',l:'Largeur grille',mn:2},{k:'gh',l:'Hauteur grille',mn:2},
+  {k:'food',l:'Nourriture',mn:1},{k:'speed',l:'Vitesse (t/s)',mn:1},
+  {k:'maxPl',l:'Max joueurs',mn:2},{k:'duration',l:'Durée s (0=∞)',mn:0},
+];
+function renderSettings(editable) {
+  let html=FLDS.map(f=>`<div class="field"><label>${f.l}</label><input type="number" id="f_${f.k}" value="${cfg[f.k]??0}" min="${f.mn}" ${editable?'':'disabled'} oninput="onFld()"></div>`).join('');
+  if(editable) html+=`<div class="ratio-row"><button class="btn btn-outline" onclick="ratio('1:1')">1:1</button><button class="btn btn-outline" onclick="ratio('16:9')">16:9</button><button class="btn btn-outline" onclick="ratio('4:3')">4:3</button></div>`;
+  const wc=cfg.wrap?'checked':'';
+  html+=`<div class="toggle-row"><label>Passer les murs</label><label class="tog"><input type="checkbox" id="f_wrap" ${wc} ${editable?'':'disabled'} onchange="onFld()"><span class="tog-sl"></span></label></div>`;
+  document.getElementById('settFields').innerHTML=html;
+  updateWallBorder(cfg.wrap);
+}
+function updateWallBorder(wrap){document.getElementById('wallBorder').classList.toggle('active',!wrap);}
+function ratio(r){
+  const w=parseInt(document.getElementById('f_gw').value)||25;
+  const m={'1:1':[1,1],'16:9':[16,9],'4:3':[4,3]};
+  document.getElementById('f_gh').value=Math.max(2,Math.round(w*m[r][1]/m[r][0]));
+  onFld();
+}
+let fldDebounce=null;
+function onFld(){if(!IS_HOST)return;clearTimeout(fldDebounce);fldDebounce=setTimeout(pushSettings,300);}
+function pushSettings(){
+  if(!IS_HOST) return;
+  const newCfg={};
+  for(const f of FLDS){const el=document.getElementById('f_'+f.k);if(el){const v=parseInt(el.value);newCfg[f.k]=isNaN(v)?0:v;}}
+  const w=document.getElementById('f_wrap');if(w)newCfg.wrap=w.checked;
+  Object.assign(cfg,newCfg);
+  gridW=cfg.gw; gridH=cfg.gh; resize();
+  bcast({t:'cfg',cfg});
+  updateWallBorder(cfg.wrap);
+  announceToLS();
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDU (style original — carrés avec grille)
+// ═══════════════════════════════════════════════════════
+function hexToRgb(h){
+  if(!h||h[0]!=='#')return{r:100,g:200,b:100};
+  return{r:parseInt(h.slice(1,3),16)||0,g:parseInt(h.slice(3,5),16)||0,b:parseInt(h.slice(5,7),16)||0};
+}
+
+function drawBg() {
+  ctx.fillStyle='#0a0f1a';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle='rgba(26,40,64,.8)';
+  ctx.lineWidth=.5;
+  for(let x=0;x<=gridW;x++){ctx.beginPath();ctx.moveTo(x*CELL,0);ctx.lineTo(x*CELL,canvas.height);ctx.stroke();}
+  for(let y=0;y<=gridH;y++){ctx.beginPath();ctx.moveTo(0,y*CELL);ctx.lineTo(canvas.width,y*CELL);ctx.stroke();}
+  if(!cfg.wrap){
+    ctx.save();ctx.strokeStyle='rgba(255,60,60,.7)';ctx.lineWidth=3;ctx.setLineDash([8,5]);
+    ctx.strokeRect(2,2,canvas.width-4,canvas.height-4);ctx.setLineDash([]);ctx.restore();
+  }
+}
+
+function drawFood(foodArr) {
+  for(const f of foodArr){
+    const cx=f[0]*CELL+CELL/2,cy=f[1]*CELL+CELL/2,r=CELL*.36;
+    ctx.fillStyle='#ff3333';
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.beginPath();ctx.arc(cx-r*.28,cy-r*.28,r*.28,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function rrect(x,y,sz,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+sz-r,y);ctx.quadraticCurveTo(x+sz,y,x+sz,y+r);
+  ctx.lineTo(x+sz,y+sz-r);ctx.quadraticCurveTo(x+sz,y+sz,x+sz-r,y+sz);
+  ctx.lineTo(x+r,y+sz);ctx.quadraticCurveTo(x,y+sz,x,y+sz-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+function drawSnake(p, isMe) {
+  if(!p.body||!p.body.length) return;
+  const alive=p.alive;
+  const col = alive ? (p.color||'#00ff88') : '#3a4055';
+  const pad=Math.max(1,Math.floor(CELL*.1));
+  const sz=CELL-pad*2;
+  const rr=Math.max(2,Math.floor(sz*.22));
+
+  for(let i=p.body.length-1;i>=0;i--){
+    const[bx,by]=p.body[i];
+    const x=bx*CELL+pad, y=by*CELL+pad;
+
+    ctx.save();
+    // Glow sur la tête
+    if(i===0&&alive){
+      ctx.shadowColor=col; ctx.shadowBlur=isMe?12:5;
+    }
+    // Couleur : tête = pleine, corps légèrement plus sombre
+    ctx.fillStyle = i===0 ? col : col+'cc';
+    rrect(x,y,sz,rr); ctx.fill();
+
+    // Bordure blanche sur la tête du joueur local
+    if(i===0&&isMe&&alive){
+      ctx.strokeStyle='rgba(255,255,255,.6)';ctx.lineWidth=1.5;
+      rrect(x,y,sz,rr);ctx.stroke();
+    }
+    ctx.restore();
+
+    // Yeux sur la tête
+    if(i===0&&alive){
+      const d=p.dir||[1,0];
+      const px=-d[1],py=d[0];
+      const er=Math.max(1.5,sz*.12);
+      const cx2=x+sz/2+d[0]*sz*.18, cy2=y+sz/2+d[1]*sz*.18;
+      for(const s of[1,-1]){
+        const ex=cx2+px*sz*.2*s, ey=cy2+py*sz*.2*s;
+        ctx.fillStyle='rgba(255,255,255,.95)';
+        ctx.beginPath();ctx.arc(ex,ey,er,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#111';
+        ctx.beginPath();ctx.arc(ex+d[0]*er*.35,ey+d[1]*er*.35,er*.55,0,Math.PI*2);ctx.fill();
+      }
+    }
+  }
+
+  // Nom au-dessus de la tête
+  if(alive&&p.body[0]){
+    const hx=p.body[0][0]*CELL+CELL/2, hy=p.body[0][1]*CELL-2;
+    const fs=Math.max(9,Math.floor(CELL*.5));
+    ctx.save();
+    ctx.font=`bold ${fs}px 'Share Tech Mono',monospace`;
+    ctx.textAlign='center';ctx.textBaseline='bottom';
+    ctx.fillStyle='rgba(0,0,0,.7)';
+    ctx.fillText((isMe?'▶ ':'')+p.name.slice(0,12),hx+1,hy+1);
+    ctx.fillStyle=isMe?'#fff':col;ctx.globalAlpha=.9;
+    ctx.fillText((isMe?'▶ ':'')+p.name.slice(0,12),hx,hy);
+    ctx.globalAlpha=1;ctx.textBaseline='alphabetic';ctx.restore();
+  }
+}
+
+function frame() {
+  requestAnimationFrame(frame);
+  drawBg();
+  // Prendre le snapshot courant (hôte : état direct, client : dernier snap reçu)
+  const snap = IS_HOST ? buildSnap() : lastSnap;
+  if (!snap) return;
+  drawFood(snap.food||[]);
+  const entries=Object.entries(snap.players||{});
+  // Morts en premier (dessous), vivants au-dessus
+  for(const[pid,p] of [...entries.filter(([,p])=>!p.alive),...entries.filter(([,p])=>p.alive)])
+    drawSnake(p, pid===myPeerId);
+}
+
+// ═══════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════
+function notif(msg,type='info',ms=4000){
+  const el=document.createElement('div');el.className='notif notif-'+type;el.textContent=msg;
+  document.getElementById('notifStack').appendChild(el);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('show')));
+  setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),300);},ms);
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function leave() {
+  if(IS_HOST){
+    fbRemove(myPeerId);
+    bcast({t:'kick',reason:'Hôte parti'});
+    if(gameTimer){clearInterval(gameTimer);gameTimer=null;}
+  }
+  window.location.href='index.html';
+}
+window.addEventListener('beforeunload',()=>{
+  if(IS_HOST&&myPeerId) fbRemove(myPeerId);
+});
+
+// ═══════════════════════════════════════════════════════
+// DÉMARRAGE
+// ═══════════════════════════════════════════════════════
+resize();
+showOverlay('conn');
+requestAnimationFrame(frame);
+
+initPeer(id => {
+  if (IS_HOST) {
+    startHost(id);
+    renderSettings(true);
+  } else {
+    document.getElementById('hostBtns').style.display='none';
+    document.getElementById('guestHint').style.display='block';
+    document.getElementById('waitHint').textContent='En attente que l\'hôte lance...';
+    renderSettings(false);
+    startClient(id);
+  }
+});
+
+// Heartbeat hôte
+setInterval(()=>{if(IS_HOST&&myPeerId) announceToLS();}, 4000);
+</script>
+</body>
+</html>

@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Minesweeper · Multijoueur</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Teko:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: #151820;
+    --border: #252a35;
+    --accent: #4ade80;
+    --accent2: #f97316;
+    --danger: #ef4444;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --cell-bg: #1e2332;
+    --cell-revealed: #111520;
+    --cell-border: #2d3548;
+    --flag: #f97316;
+    --mine: #ef4444;
+    --num1: #60a5fa; --num2: #4ade80; --num3: #f87171;
+    --num4: #818cf8; --num5: #fb923c; --num6: #34d399;
+    --num7: #f472b6; --num8: #a3a3a3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* ── SCREENS ─────────────────────── */
+  .screen { display: none; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .screen.active { display: flex; }
+
+  /* ── TITLE ───────────────────────── */
+  .title-wrap { text-align: center; margin-bottom: 32px; }
+  h1 {
+    font-family: 'Teko', sans-serif;
+    font-size: clamp(42px, 10vw, 80px);
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-shadow: 0 0 30px rgba(74,222,128,.35);
+    line-height: 1;
+  }
+  .subtitle { color: var(--muted); font-size: 13px; letter-spacing: 3px; margin-top: 4px; }
+
+  /* ── CARD / PANEL ────────────────── */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    width: 100%;
+    max-width: 440px;
+  }
+  .card.wide { max-width: 560px; }
+  .card + .card { margin-top: 16px; }
+
+  /* ── INPUTS ──────────────────────── */
+  input[type=text], input[type=number], select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    width: 100%;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  select option { background: var(--panel); }
+  label { font-size: 12px; color: var(--muted); letter-spacing: 1px; display: block; margin-bottom: 6px; margin-top: 14px; }
+  label:first-child { margin-top: 0; }
+
+  /* ── BUTTONS ─────────────────────── */
+  button {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 1px;
+    padding: 11px 22px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-primary { background: var(--accent); color: #000; font-weight: bold; }
+  .btn-primary:hover { background: #22c55e; transform: translateY(-1px); }
+  .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #dc2626; }
+  .btn-full { width: 100%; margin-top: 16px; }
+  .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+  .btn-row button { flex: 1; }
+
+  /* ── LOBBY LIST ──────────────────── */
+  .lobby-list { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-top: 10px; }
+  .lobby-item {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 14px;
+    cursor: pointer; transition: border-color .15s;
+  }
+  .lobby-item:hover { border-color: var(--accent); }
+  .lobby-item .li-name { font-size: 14px; color: var(--text); }
+  .lobby-item .li-info { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .lobby-item .li-join { font-size: 12px; color: var(--accent); }
+  .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+
+  /* ── SETTINGS GRID ───────────────── */
+  .settings-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
+  .settings-grid .full { grid-column: 1; }
+
+  /* ── RANGE INPUT ─────────────────── */
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .range-val { min-width: 36px; text-align: right; color: var(--accent); font-size: 14px; }
+
+  /* ── WAITING ROOM ────────────────── */
+  #waitingScreen { gap: 16px; }
+  .player-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .player-list li {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 14px; font-size: 14px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .dot.host { background: var(--accent2); }
+  .peer-id-box { font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+  .copy-btn { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; margin-left: 6px; }
+  .status-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 20px;
+    font-size: 11px; letter-spacing: 1px;
+    background: rgba(74,222,128,.12); color: var(--accent); border: 1px solid rgba(74,222,128,.3);
+  }
+
+  /* ── GAME SCREEN ─────────────────── */
+  #gameScreen { padding: 0; justify-content: flex-start; min-height: 100vh; }
+  #gameScreen.active { display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    gap: 12px; flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .topbar-title { font-family: 'Teko', sans-serif; font-size: 22px; color: var(--accent); letter-spacing: 2px; }
+  .topbar-stats { display: flex; gap: 16px; align-items: center; }
+  .stat { display: flex; flex-direction: column; align-items: center; min-width: 50px; }
+  .stat-val { font-family: 'Teko', sans-serif; font-size: 26px; line-height: 1; color: var(--text); }
+  .stat-lbl { font-size: 10px; color: var(--muted); letter-spacing: 1px; }
+  .stat-val.red { color: var(--danger); }
+  .stat-val.green { color: var(--accent); }
+
+  /* ── SCOREBOARD ──────────────────── */
+  .scoreboard { display: flex; gap: 6px; flex-wrap: wrap; }
+  .score-chip {
+    font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    border: 1px solid var(--border); background: var(--bg);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .score-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ── GRID AREA ───────────────────── */
+  .game-area {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px;
+    position: relative;
+    box-sizing: border-box;
+  }
+  .grid-wrapper { position: relative; display: inline-block; user-select: none; }
+  #gameGrid {
+    display: grid;
+    gap: 2px;
+    border: 1px solid var(--border);
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .cell {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: bold;
+    background: var(--cell-bg);
+    cursor: pointer;
+    transition: background .08s;
+    position: relative;
+  }
+  .cell:hover:not(.revealed):not(.flagged) { background: #252c3e; }
+  .cell.revealed { background: var(--cell-revealed); cursor: default; }
+  .cell.flagged { background: var(--cell-bg); }
+  .cell.flagged::after { content: '🚩'; }
+  .cell.mine-hit { background: #3d1111 !important; }
+  .cell.mine-show::after { content: '💣'; }
+
+  /* ── CURSORS ─────────────────────── */
+  .remote-cursor {
+    position: absolute; pointer-events: none; z-index: 100;
+    transition: left .05s, top .05s;
+  }
+  .cursor-arrow {
+    width: 0; height: 0;
+    border-left: 7px solid transparent;
+    border-right: 0px solid transparent;
+    border-bottom: 11px solid var(--accent);
+    transform: rotate(-30deg);
+    filter: drop-shadow(0 0 4px rgba(74,222,128,.6));
+  }
+  .cursor-name {
+    position: absolute; left: 10px; top: 6px;
+    font-size: 10px; white-space: nowrap;
+    background: rgba(0,0,0,.75);
+    border: 1px solid var(--border);
+    padding: 2px 6px; border-radius: 3px;
+    letter-spacing: .5px;
+  }
+
+  /* ── OVERLAY ─────────────────────── */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.75);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200; display: none;
+  }
+  .overlay.show { display: flex; }
+  .overlay-box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 32px; text-align: center; max-width: 340px; width: 90%; }
+  .overlay-icon { font-size: 48px; margin-bottom: 12px; }
+  .overlay-title { font-family: 'Teko', sans-serif; font-size: 32px; letter-spacing: 3px; margin-bottom: 8px; }
+  .overlay-sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  /* ── TOAST ───────────────────────── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px 20px; border-radius: 4px; font-size: 13px;
+    opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 300;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ── SCROLLBAR ───────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── MOBILE ──────────────────────── */
+  @media (max-width: 500px) {
+    .cell { width: 28px; height: 28px; font-size: 13px; }
+    .cell.flagged::after { font-size: 13px; }
+    .cell.mine-show::after { font-size: 13px; }
+  }
+  .section-title { font-family: 'Teko', sans-serif; font-size: 18px; letter-spacing: 2px; color: var(--muted); margin-bottom: 12px; }
+  .divider { height: 1px; background: var(--border); margin: 16px 0; }
+  a.link { color: var(--accent); text-decoration: none; }
+  a.link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ MENU SCREEN ═══════════════════ -->
+<div id="menuScreen" class="screen active">
+  <div class="title-wrap">
+    <h1>MINESWEEPER</h1>
+    <div class="subtitle">MULTIJOUEUR · P2P</div>
+  </div>
+  <div class="card">
+    <label>TON PSEUDO</label>
+    <input type="text" id="playerName" placeholder="ex: Joueur" maxlength="16">
+    <div class="btn-row" style="margin-top:20px">
+      <button class="btn-primary" onclick="goToCreate()">Créer une partie</button>
+      <button class="btn-secondary" onclick="goToJoin()">Rejoindre</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ CREATE SCREEN ═══════════════════ -->
+<div id="createScreen" class="screen">
+  <div class="title-wrap">
+    <h1>CRÉER</h1>
+    <div class="subtitle">PARAMÈTRES DE PARTIE</div>
+  </div>
+  <div class="card wide">
+      <div class="full">
+        <label>NOM DE LA PARTIE</label>
+        <input type="text" id="lobbyName" placeholder="Ma partie" maxlength="24">
+      </div>
+      <div>
+        <label>LARGEUR (colonnes)</label>
+        <div class="range-row">
+          <input type="range" id="gridW" min="5" max="40" value="16" oninput="syncRange('gridW','gridWV')">
+          <span class="range-val" id="gridWV">16</span>
+        </div>
+      </div>
+      <div>
+        <label>HAUTEUR (lignes)</label>
+        <div class="range-row">
+          <input type="range" id="gridH" min="5" max="30" value="16" oninput="syncRange('gridH','gridHV')">
+          <span class="range-val" id="gridHV">16</span>
+        </div>
+      </div>
+      <div>
+        <label>BOMBES</label>
+        <div class="range-row">
+          <input type="range" id="mineCount" min="1" max="200" value="40" oninput="syncRange('mineCount','mineCountV')">
+          <span class="range-val" id="mineCountV">40</span>
+        </div>
+      </div>
+      <div>
+        <label>MAX JOUEURS</label>
+        <div class="range-row">
+          <input type="range" id="maxPlayers" min="2" max="8" value="4" oninput="syncRange('maxPlayers','maxPlayersV')">
+          <span class="range-val" id="maxPlayersV">4</span>
+        </div>
+      </div>
+      <div>
+        <label>TEMPS LIMITE (sec, 0=infini)</label>
+        <div class="range-row">
+          <input type="range" id="timeLimit" min="0" max="600" step="30" value="0" oninput="syncRange('timeLimit','timeLimitV')">
+          <span class="range-val" id="timeLimitV">∞</span>
+        </div>
+      </div>
+      <div>
+        <label>MODE</label>
+        <select id="gameMode">
+          <option value="coop">Coopératif</option>
+          <option value="comp">Compétitif</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-secondary" onclick="showScreen('menuScreen')">← Retour</button>
+      <button class="btn-primary" onclick="createLobby()">Créer →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ JOIN SCREEN ═══════════════════ -->
+<div id="joinScreen" class="screen">
+  <div class="title-wrap">
+    <h1>REJOINDRE</h1>
+    <div class="subtitle">PARTIES DISPONIBLES</div>
+  </div>
+  <div class="card">
+    <div class="section-title">PARTIES EN LIGNE</div>
+    <div class="lobby-list" id="lobbyList"><div class="empty-msg">Chargement…</div></div>
+    <div class="divider"></div>
+    <label>OU REJOINDRE PAR ID</label>
+    <input type="text" id="directPeerId" placeholder="Peer ID de l'hôte">
+    <div class="btn-row">
+      <button class="btn-secondary" onclick="showScreen('menuScreen')">← Retour</button>
+      <button class="btn-primary" onclick="joinDirect()">Rejoindre →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ WAITING SCREEN ═══════════════════ -->
+<div id="waitingScreen" class="screen">
+  <div class="title-wrap">
+    <h1>LOBBY</h1>
+    <div id="waitStatusBadge" class="status-badge">EN ATTENTE</div>
+  </div>
+  <div class="card" style="max-width:480px">
+    <div class="section-title">JOUEURS <span id="playerCountLabel"></span></div>
+    <ul class="player-list" id="playerListEl"></ul>
+    <div class="divider"></div>
+    <div style="font-size:12px; color:var(--muted)">ID DE LA PARTIE</div>
+    <div class="peer-id-box" id="peerIdDisplay">—
+      <span class="copy-btn" onclick="copyPeerId()">copier</span>
+    </div>
+    <div id="hostControls">
+      <div class="btn-row">
+        <button class="btn-danger" onclick="leaveLobby()">Quitter</button>
+        <button class="btn-primary" id="startBtn" onclick="hostStartGame()">Lancer →</button>
+      </div>
+    </div>
+    <div id="guestControls" style="display:none">
+      <button class="btn-danger btn-full" onclick="leaveLobby()">Quitter</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ GAME SCREEN ═══════════════════ -->
+<div id="gameScreen" class="screen">
+  <div class="topbar">
+    <div class="topbar-title">💣 MINESWEEPER</div>
+    <div class="topbar-stats">
+      <div class="stat"><div class="stat-val" id="statMines">0</div><div class="stat-lbl">MINES</div></div>
+      <div class="stat"><div class="stat-val green" id="statFlags">0</div><div class="stat-lbl">DRAPEAUX</div></div>
+      <div class="stat"><div class="stat-val" id="statTimer">∞</div><div class="stat-lbl">TEMPS</div></div>
+    </div>
+    <div class="scoreboard" id="scoreboard"></div>
+    <button class="btn-secondary" style="font-size:12px; padding:6px 12px" onclick="leaveLobby()">Quitter</button>
+  </div>
+  <div class="game-area" id="gameArea">
+    <div class="grid-wrapper" id="gridWrapper">
+      <div id="gameGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ OVERLAY ═══════════════════ -->
+<div class="overlay" id="overlay">
+  <div class="overlay-box">
+    <div class="overlay-icon" id="overlayIcon">🎉</div>
+    <div class="overlay-title" id="overlayTitle">VICTOIRE</div>
+    <div class="overlay-sub" id="overlaySub"></div>
+    <button class="btn-primary" onclick="leaveLobby()">Menu principal</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ════════════════════════════════════════════════════════
+   FIREBASE CONFIG — remplace par ta config
+════════════════════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey: "238847906143",
+  authDomain: "VOTRE_PROJECT.firebaseapp.com",
+  databaseURL: "https://snake-p2p-dca09-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "VOTRE_PROJECT",
+  storageBucket: "VOTRE_PROJECT.appspot.com",
+  messagingSenderId: "VOTRE_SENDER_ID",
+  appId: "VOTRE_APP_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+const fbDb = firebase.database();
+const FB_PATH = 'games/minesweeper/lobbies';
+
+/* ════════════════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════════════════ */
+let myName = '', myPeer = null, myPeerId = '';
+let isHost = false, hostConn = null;
+let guestConns = {}; // peerId -> DataConnection
+let currentLobbyRef = null;
+let lobbyListRef = null, lobbyListOff = null;
+
+// Game state
+let gameSettings = {};
+let board = []; // 2D array: {mine, revealed, flagged, adjacent}
+let gameActive = false, gameOver = false;
+let timerInterval = null, elapsed = 0;
+let scores = {}; // peerId -> {name, color, flags, reveals}
+let myColor = '';
+const COLORS = ['#4ade80','#60a5fa','#f97316','#f472b6','#a78bfa','#34d399','#fbbf24','#f87171'];
+let remoteCursors = {}; // peerId -> {el, name}
+let firstClick = true;
+
+/* ════════════════════════════════════════════════════════
+   UTILS
+════════════════════════════════════════════════════════ */
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function syncRange(id, valId) {
+  const v = document.getElementById(id).value;
+  const el = document.getElementById(valId);
+  if (id === 'timeLimit') el.textContent = v == 0 ? '∞' : v + 's';
+  else el.textContent = v;
+}
+function toast(msg, dur = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), dur);
+}
+function copyPeerId() {
+  navigator.clipboard.writeText(myPeerId).then(() => toast('ID copié !'));
+}
+function randColor(idx) { return COLORS[idx % COLORS.length]; }
+
+/* ════════════════════════════════════════════════════════
+   SCREEN TRANSITIONS
+════════════════════════════════════════════════════════ */
+function goToCreate() {
+  myName = document.getElementById('playerName').value.trim() || 'Joueur';
+  showScreen('createScreen');
+}
+function goToJoin() {
+  myName = document.getElementById('playerName').value.trim() || 'Joueur';
+  showScreen('joinScreen');
+  startListeningLobbies();
+}
+
+/* ════════════════════════════════════════════════════════
+   PEERJS INIT
+════════════════════════════════════════════════════════ */
+function initPeer(cb) {
+  if (myPeer && !myPeer.destroyed) { cb(myPeer); return; }
+  myPeer = new Peer();
+  myPeer.on('open', id => { myPeerId = id; cb(myPeer); });
+  myPeer.on('error', err => toast('Erreur PeerJS: ' + err.type));
+}
+
+/* ════════════════════════════════════════════════════════
+   FIREBASE LOBBY
+════════════════════════════════════════════════════════ */
+function startListeningLobbies() {
+  if (lobbyListOff) lobbyListOff();
+  lobbyListRef = fbDb.ref(FB_PATH);
+  const handler = snap => {
+    const list = document.getElementById('lobbyList');
+    const data = snap.val();
+    if (!data) { list.innerHTML = '<div class="empty-msg">Aucune partie disponible</div>'; return; }
+    const lobbies = Object.values(data).filter(l => l.status === 'waiting');
+    if (!lobbies.length) { list.innerHTML = '<div class="empty-msg">Aucune partie disponible</div>'; return; }
+    list.innerHTML = '';
+    lobbies.sort((a, b) => b.ts - a.ts).forEach(l => {
+      const div = document.createElement('div');
+      div.className = 'lobby-item';
+      div.innerHTML = `
+        <div>
+          <div class="li-name">${esc(l.name)}</div>
+          <div class="li-info">Hôte: ${esc(l.host)} · ${l.players}/${l.maxPlayers} · ${l.gw}×${l.gh} · ${l.mines} mines · ${l.mode}</div>
+        </div>
+        <div class="li-join">Rejoindre →</div>`;
+      div.onclick = () => joinLobby(l.id);
+      list.appendChild(div);
+    });
+  };
+  lobbyListRef.on('value', handler);
+  lobbyListOff = () => lobbyListRef.off('value', handler);
+}
+function stopListeningLobbies() { if (lobbyListOff) { lobbyListOff(); lobbyListOff = null; } }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function writeLobby(extra = {}) {
+  const s = gameSettings;
+  return fbDb.ref(`${FB_PATH}/${myPeerId}`).set({
+    id: myPeerId,
+    name: s.name,
+    host: myName,
+    players: 1,
+    maxPlayers: s.maxPlayers,
+    gw: s.gw,
+    gh: s.gh,
+    mines: s.mines,
+    mode: s.mode,
+    timeLimit: s.timeLimit,
+    status: 'waiting',
+    ts: firebase.database.ServerValue.TIMESTAMP,
+    ...extra
+  });
+}
+function updateLobbyPlayers(n) {
+  if (isHost) fbDb.ref(`${FB_PATH}/${myPeerId}/players`).set(n);
+}
+function updateLobbyStatus(st) {
+  if (isHost) fbDb.ref(`${FB_PATH}/${myPeerId}/status`).set(st);
+}
+function removeLobby() {
+  fbDb.ref(`${FB_PATH}/${myPeerId}`).remove();
+}
+
+/* ════════════════════════════════════════════════════════
+   CREATE LOBBY
+════════════════════════════════════════════════════════ */
+function createLobby() {
+  gameSettings = {
+    name: document.getElementById('lobbyName').value.trim() || myName + "'s game",
+    gw: +document.getElementById('gridW').value,
+    gh: +document.getElementById('gridH').value,
+    mines: Math.min(+document.getElementById('mineCount').value, document.getElementById('gridW').value * document.getElementById('gridH').value - 9),
+    maxPlayers: +document.getElementById('maxPlayers').value,
+    timeLimit: +document.getElementById('timeLimit').value,
+    mode: document.getElementById('gameMode').value
+  };
+  isHost = true;
+  myColor = randColor(0);
+  scores = { [myName]: { name: myName, color: myColor, flags: 0, reveals: 0, peerId: 'me' } };
+
+  initPeer(peer => {
+    writeLobby();
+    currentLobbyRef = fbDb.ref(`${FB_PATH}/${myPeerId}`);
+    setupHostConnections();
+    showWaitingRoom();
+  });
+}
+
+function setupHostConnections() {
+  myPeer.on('connection', conn => {
+    const pid = conn.peer;
+    guestConns[pid] = conn;
+    conn.on('open', () => {
+      // Send game settings + current players
+      conn.send({ type: 'init', settings: gameSettings, players: getPlayersMap(), hostColor: myColor });
+    });
+    conn.on('data', d => handleHostReceive(d, conn, pid));
+    conn.on('close', () => {
+      delete guestConns[pid];
+      const name = Object.keys(scores).find(k => scores[k].peerId === pid);
+      if (name) delete scores[name];
+      broadcastToGuests({ type: 'player_left', peerId: pid });
+      updateLobbyPlayers(1 + Object.keys(guestConns).length);
+      refreshWaitingPlayers();
+    });
+  });
+}
+
+function getPlayersMap() {
+  return Object.fromEntries(Object.entries(scores).map(([k,v]) => [k, v]));
+}
+
+function handleHostReceive(data, conn, pid) {
+  switch (data.type) {
+    case 'join':
+      const colorIdx = 1 + Object.keys(guestConns).indexOf(pid);
+      const col = randColor(colorIdx);
+      scores[data.name] = { name: data.name, color: col, flags: 0, reveals: 0, peerId: pid };
+      conn.send({ type: 'your_color', color: col });
+      broadcastToGuests({ type: 'player_joined', name: data.name, color: col, peerId: pid });
+      updateLobbyPlayers(1 + Object.keys(guestConns).length);
+      refreshWaitingPlayers();
+      break;
+    case 'cursor':
+      broadcastToGuests({ type: 'cursor', peerId: pid, x: data.x, y: data.y, name: data.name }, pid);
+      break;
+    case 'reveal':
+      if (!gameActive || gameOver) break;
+      processReveal(data.col, data.row, data.name);
+      break;
+    case 'flag':
+      if (!gameActive || gameOver) break;
+      processFlag(data.col, data.row, data.name);
+      break;
+    case 'chat':
+      broadcastToGuests({ type: 'chat', name: data.name, msg: data.msg }, pid);
+      break;
+  }
+}
+
+function broadcastToGuests(data, excludePid = null) {
+  Object.entries(guestConns).forEach(([pid, conn]) => {
+    if (pid !== excludePid) conn.send(data);
+  });
+}
+
+/* ════════════════════════════════════════════════════════
+   JOIN LOBBY
+════════════════════════════════════════════════════════ */
+function joinLobby(hostPeerId) {
+  stopListeningLobbies();
+  isHost = false;
+  connectToPeer(hostPeerId);
+}
+function joinDirect() {
+  const id = document.getElementById('directPeerId').value.trim();
+  if (!id) { toast('Entre un ID de partie'); return; }
+  stopListeningLobbies();
+  isHost = false;
+  connectToPeer(id);
+}
+
+function connectToPeer(hostPeerId) {
+  initPeer(peer => {
+    hostConn = peer.connect(hostPeerId, { reliable: true });
+    hostConn.on('open', () => {
+      hostConn.send({ type: 'join', name: myName });
+      showWaitingRoom(false);
+    });
+    hostConn.on('data', d => handleGuestReceive(d));
+    hostConn.on('close', () => {
+      toast('Déconnecté de l\'hôte');
+      if (gameActive) { gameOver = true; showOverlay('😢', 'DÉCONNECTÉ', 'L\'hôte s\'est déconnecté'); }
+      else { leaveLobby(); }
+    });
+    hostConn.on('error', e => toast('Connexion impossible: ' + e));
+  });
+}
+
+function handleGuestReceive(data) {
+  switch (data.type) {
+    case 'init':
+      gameSettings = data.settings;
+      scores = data.players || {};
+      // Assign our color
+      break;
+    case 'your_color':
+      myColor = data.color;
+      scores[myName] = scores[myName] || { name: myName, color: myColor, flags: 0, reveals: 0 };
+      scores[myName].color = myColor;
+      break;
+    case 'player_joined':
+      scores[data.name] = { name: data.name, color: data.color, flags: 0, reveals: 0, peerId: data.peerId };
+      refreshWaitingPlayers();
+      break;
+    case 'player_left':
+      const leftName = Object.keys(scores).find(k => scores[k].peerId === data.peerId);
+      if (leftName) delete scores[leftName];
+      removeRemoteCursor(data.peerId);
+      refreshWaitingPlayers();
+      break;
+    case 'board_ready':
+      // Host placed mines after first click - update our local board adjacency info
+      // We don't get mine positions, just update what's visible
+      break;
+    case 'start':
+      gameSettings = data.settings;
+      scores = data.players;
+      board = data.board;
+      startGameClient();
+      break;
+    case 'reveal_result':
+      applyReveal(data.col, data.row, data.cells, data.name);
+      break;
+    case 'flag_result':
+      applyFlag(data.col, data.row, data.flagged, data.name);
+      break;
+    case 'cursor':
+      updateRemoteCursor(data.peerId, data.x, data.y, data.name);
+      break;
+    case 'game_over':
+      handleGameOver(data);
+      break;
+    case 'scores':
+      scores = data.scores;
+      refreshScoreboard();
+      break;
+  }
+}
+
+/* ════════════════════════════════════════════════════════
+   WAITING ROOM
+════════════════════════════════════════════════════════ */
+function showWaitingRoom(host = isHost) {
+  document.getElementById('peerIdDisplay').childNodes[0].textContent = myPeerId + ' ';
+  document.getElementById('hostControls').style.display = host ? '' : 'none';
+  document.getElementById('guestControls').style.display = host ? 'none' : '';
+  refreshWaitingPlayers();
+  showScreen('waitingScreen');
+}
+function refreshWaitingPlayers() {
+  const ul = document.getElementById('playerListEl');
+  ul.innerHTML = '';
+  const all = isHost
+    ? [{ name: myName, color: myColor, isHost: true }, ...Object.values(guestConns).map((c, i) => {
+        const entry = Object.values(scores).find(s => s.peerId === c.peer);
+        return { name: entry ? entry.name : '…', color: entry ? entry.color : COLORS[i+1], isHost: false };
+      })]
+    : Object.values(scores).map((s, i) => ({ name: s.name, color: s.color, isHost: i === 0 }));
+
+  if (!all.length && scores) {
+    Object.values(scores).forEach((s, i) => all.push({ name: s.name, color: s.color, isHost: i===0 }));
+  }
+  const seen = new Set();
+  all.forEach(p => {
+    if (seen.has(p.name)) return; seen.add(p.name);
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="dot ${p.isHost?'host':''}" style="background:${p.color}"></div>${esc(p.name)}${p.isHost?' <span style="color:var(--accent2);font-size:11px">[HÔTE]</span>':''}`;
+    ul.appendChild(li);
+  });
+  const total = seen.size || 1;
+  document.getElementById('playerCountLabel').textContent = `(${total}/${gameSettings.maxPlayers||'?'})`;
+}
+
+/* ════════════════════════════════════════════════════════
+   HOST START GAME
+════════════════════════════════════════════════════════ */
+function hostStartGame() {
+  // Build a placeholder board (no mines yet) just for rendering
+  buildEmptyBoard();
+  updateLobbyStatus('playing');
+  const playersMap = getPlayersMap();
+  // Send empty board to guests so they see the grid
+  broadcastToGuests({ type: 'start', settings: gameSettings, players: playersMap, board: boardToTransfer() });
+  startGameHost();
+}
+
+function boardToTransfer() {
+  // Send board without mine positions for guests
+  return board.map(row => row.map(c => ({ revealed: c.revealed, flagged: c.flagged, adjacent: c.revealed ? c.adjacent : null })));
+}
+
+/* ════════════════════════════════════════════════════════
+   BOARD GENERATION
+════════════════════════════════════════════════════════ */
+function buildEmptyBoard() {
+  const { gw, gh } = gameSettings;
+  board = Array.from({ length: gh }, () =>
+    Array.from({ length: gw }, () => ({ mine: false, revealed: false, flagged: false, adjacent: 0 }))
+  );
+}
+
+function buildBoard(firstClickCol = -1, firstClickRow = -1) {
+  const { gw, gh, mines } = gameSettings;
+  // Start from existing board state (keep flags/revealed if any), reset mines
+  board = Array.from({ length: gh }, (_, r) =>
+    Array.from({ length: gw }, (_, c) => ({
+      mine: false,
+      revealed: board[r] && board[r][c] ? board[r][c].revealed : false,
+      flagged: board[r] && board[r][c] ? board[r][c].flagged : false,
+      adjacent: 0
+    }))
+  );
+  // Excluded zone around first click
+  const excluded = new Set();
+  if (firstClickCol >= 0) {
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const nr = firstClickRow + dr, nc = firstClickCol + dc;
+      if (nr >= 0 && nr < gh && nc >= 0 && nc < gw) excluded.add(nr * gw + nc);
+    }
+  }
+  let placed = 0;
+  while (placed < mines) {
+    const idx = Math.floor(Math.random() * gw * gh);
+    if (!excluded.has(idx) && !board[Math.floor(idx / gw)][idx % gw].mine) {
+      board[Math.floor(idx / gw)][idx % gw].mine = true;
+      placed++;
+    }
+  }
+  // Calculate adjacency
+  for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+    if (board[r][c].mine) continue;
+    let count = 0;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < gh && nc >= 0 && nc < gw && board[nr][nc].mine) count++;
+    }
+    board[r][c].adjacent = count;
+  }
+}
+
+/* ════════════════════════════════════════════════════════
+   START GAME
+════════════════════════════════════════════════════════ */
+function startGameHost() {
+  firstClick = true;
+  gameActive = true; gameOver = false;
+  elapsed = 0;
+  buildGameGrid();
+  showScreen('gameScreen');
+  refreshScoreboard();
+  if (gameSettings.timeLimit > 0) startTimer();
+  updateStatMines();
+}
+
+function startGameClient() {
+  firstClick = false; // host handles board gen on first click
+  gameActive = true; gameOver = false;
+  elapsed = 0;
+  buildGameGrid();
+  showScreen('gameScreen');
+  refreshScoreboard();
+  if (gameSettings.timeLimit > 0) startTimer();
+  updateStatMines();
+}
+
+/* ════════════════════════════════════════════════════════
+   RENDER GRID
+════════════════════════════════════════════════════════ */
+const NUM_COLORS = ['','#60a5fa','#4ade80','#f87171','#818cf8','#fb923c','#34d399','#f472b6','#a3a3a3'];
+
+function buildGameGrid() {
+  const { gw, gh } = gameSettings;
+  const grid = document.getElementById('gameGrid');
+
+  // Calculate optimal cell size to fit viewport
+  const topbarH = document.querySelector('.topbar') ? document.querySelector('.topbar').offsetHeight + 32 : 90;
+  const availW = window.innerWidth - 32;
+  const availH = window.innerHeight - topbarH;
+  const cellW = Math.floor(availW / gw);
+  const cellH = Math.floor(availH / gh);
+  const cellSize = Math.max(22, Math.min(36, cellW, cellH));
+  const fontSize = Math.max(11, Math.floor(cellSize * 0.52));
+
+  // Apply dynamic cell size — append AFTER static styles so it wins
+  let dynStyle = document.getElementById('dynamicCellStyle');
+  if (!dynStyle) { dynStyle = document.createElement('style'); dynStyle.id = 'dynamicCellStyle'; document.head.appendChild(dynStyle); }
+  dynStyle.textContent = `
+    #gameGrid .cell { width: ${cellSize}px !important; height: ${cellSize}px !important; font-size: ${fontSize}px !important; line-height: 1 !important; }
+    #gameGrid .cell.flagged::after { font-size: ${Math.max(11, fontSize - 1)}px !important; }
+    #gameGrid .cell.mine-show::after { font-size: ${Math.max(11, fontSize - 1)}px !important; }
+  `;
+
+  grid.style.gridTemplateColumns = `repeat(${gw}, ${cellSize}px)`;
+  grid.innerHTML = '';
+  for (let r = 0; r < gh; r++) {
+    for (let c = 0; c < gw; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r; cell.dataset.c = c;
+      cell.addEventListener('click', onCellClick);
+      cell.addEventListener('contextmenu', onCellRightClick);
+      // Long press for mobile flag
+      let longPressTimer;
+      cell.addEventListener('touchstart', e => {
+        longPressTimer = setTimeout(() => {
+          e.preventDefault();
+          onCellFlag(+cell.dataset.c, +cell.dataset.r);
+        }, 500);
+      }, { passive: true });
+      cell.addEventListener('touchend', () => clearTimeout(longPressTimer));
+      cell.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+      grid.appendChild(cell);
+    }
+  }
+  // Mouse tracking for cursors
+  const wrapper = document.getElementById('gridWrapper');
+  wrapper.addEventListener('mousemove', onMouseMove);
+  renderAllCells();
+}
+
+function renderAllCells() {
+  const { gw, gh } = gameSettings;
+  const grid = document.getElementById('gameGrid');
+  for (let r = 0; r < gh; r++) {
+    for (let c = 0; c < gw; c++) {
+      renderCell(c, r);
+    }
+  }
+}
+
+function renderCell(c, r) {
+  const grid = document.getElementById('gameGrid');
+  const idx = r * gameSettings.gw + c;
+  const cell = grid.children[idx];
+  if (!cell) return;
+  const b = board[r][c];
+  cell.className = 'cell';
+  cell.textContent = '';
+  cell.style.color = '';
+  cell.removeAttribute('data-n');
+  if (b.revealed) {
+    cell.classList.add('revealed');
+    if (b.mine) {
+      cell.classList.add('mine-hit');
+      cell.classList.add('mine-show');
+    } else if (b.adjacent > 0) {
+      cell.textContent = b.adjacent;
+      cell.style.color = NUM_COLORS[b.adjacent] || '#fff';
+    }
+  } else if (b.flagged) {
+    cell.classList.add('flagged');
+  }
+}
+
+/* ════════════════════════════════════════════════════════
+   INTERACTION
+════════════════════════════════════════════════════════ */
+function onCellClick(e) {
+  const c = +e.currentTarget.dataset.c, r = +e.currentTarget.dataset.r;
+  if (!gameActive || gameOver) return;
+  if (board[r][c].flagged || board[r][c].revealed) return;
+
+  if (isHost) {
+    if (firstClick) {
+      firstClick = false;
+      // Build the real board around first click (guaranteed safe zone)
+      buildBoard(c, r);
+      // Broadcast the new board layout to guests (still no mine info)
+      broadcastToGuests({ type: 'board_ready', board: boardToTransfer() });
+    }
+    processReveal(c, r, myName);
+  } else {
+    hostConn.send({ type: 'reveal', col: c, row: r, name: myName });
+  }
+}
+
+function onCellRightClick(e) {
+  e.preventDefault();
+  const c = +e.currentTarget.dataset.c, r = +e.currentTarget.dataset.r;
+  onCellFlag(c, r);
+}
+
+function onCellFlag(c, r) {
+  if (!gameActive || gameOver) return;
+  if (board[r][c].revealed) return;
+  if (isHost) {
+    processFlag(c, r, myName);
+  } else {
+    hostConn.send({ type: 'flag', col: c, row: r, name: myName });
+  }
+}
+
+/* ════════════════════════════════════════════════════════
+   GAME LOGIC (HOST ONLY)
+════════════════════════════════════════════════════════ */
+function processReveal(c, r, playerName) {
+  if (board[r][c].revealed || board[r][c].flagged) return;
+  const cells = [];
+  floodReveal(c, r, cells);
+  if (!cells.length) return;
+
+  // Update scores
+  if (!scores[playerName]) scores[playerName] = { name: playerName, color: '#fff', flags: 0, reveals: 0 };
+  scores[playerName].reveals += cells.length;
+
+  const hitMine = cells.some(([cc, rr]) => board[rr][cc].mine);
+
+  applyReveal(c, r, cells, playerName);
+  broadcastToGuests({ type: 'reveal_result', col: c, row: r, cells, name: playerName });
+  broadcastToGuests({ type: 'scores', scores });
+  refreshScoreboard();
+
+  if (hitMine) {
+    revealAllMines();
+    const result = { type: 'game_over', reason: 'mine', loser: playerName };
+    broadcastToGuests(result);
+    handleGameOver(result);
+  } else if (checkWin()) {
+    const winner = getBestPlayer();
+    const result = { type: 'game_over', reason: 'win', winner };
+    broadcastToGuests(result);
+    handleGameOver(result);
+  }
+  updateStatMines();
+}
+
+function floodReveal(c, r, cells) {
+  const { gw, gh } = gameSettings;
+  if (r < 0 || r >= gh || c < 0 || c >= gw) return;
+  if (board[r][c].revealed || board[r][c].flagged) return;
+  board[r][c].revealed = true;
+  cells.push([c, r]);
+  if (!board[r][c].mine && board[r][c].adjacent === 0) {
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if (dr || dc) floodReveal(c + dc, r + dr, cells);
+    }
+  }
+}
+
+function processFlag(c, r, playerName) {
+  if (board[r][c].revealed) return;
+  board[r][c].flagged = !board[r][c].flagged;
+  if (!scores[playerName]) scores[playerName] = { name: playerName, color: '#fff', flags: 0, reveals: 0 };
+  scores[playerName].flags += board[r][c].flagged ? 1 : -1;
+
+  applyFlag(c, r, board[r][c].flagged, playerName);
+  broadcastToGuests({ type: 'flag_result', col: c, row: r, flagged: board[r][c].flagged, name: playerName });
+  broadcastToGuests({ type: 'scores', scores });
+  refreshScoreboard();
+  updateStatMines();
+}
+
+function applyReveal(c, r, cells, playerName) {
+  cells.forEach(([cc, rr]) => {
+    if (board[rr]) board[rr][cc].revealed = true;
+    renderCell(cc, rr);
+  });
+}
+
+function applyFlag(c, r, flagged, playerName) {
+  if (board[r]) board[r][c].flagged = flagged;
+  renderCell(c, r);
+  updateStatMines();
+}
+
+function revealAllMines() {
+  const { gw, gh } = gameSettings;
+  for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+    if (board[r][c].mine && !board[r][c].revealed) {
+      board[r][c].revealed = true;
+      renderCell(c, r);
+    }
+  }
+}
+
+function checkWin() {
+  const { gw, gh } = gameSettings;
+  for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+    if (!board[r][c].mine && !board[r][c].revealed) return false;
+  }
+  return true;
+}
+
+function getBestPlayer() {
+  return Object.entries(scores).sort((a, b) => (b[1].reveals + b[1].flags * 2) - (a[1].reveals + a[1].flags * 2))[0]?.[0] || '?';
+}
+
+/* ════════════════════════════════════════════════════════
+   GAME OVER
+════════════════════════════════════════════════════════ */
+function handleGameOver(data) {
+  gameActive = false; gameOver = true;
+  clearInterval(timerInterval);
+  updateLobbyStatus('finished');
+
+  if (data.reason === 'mine') {
+    const isMe = data.loser === myName;
+    showOverlay('💥', isMe ? 'KABOOM !' : 'PARTIE PERDUE',
+      isMe ? 'Tu as marché sur une mine !' : `${data.loser} a marché sur une mine !`);
+  } else if (data.reason === 'win') {
+    const isMe = data.winner === myName;
+    showOverlay('🎉', 'VICTOIRE !', isMe ? 'Tu as remporté la partie !' : `${data.winner} a gagné !`);
+  } else if (data.reason === 'timeout') {
+    showOverlay('⏰', 'TEMPS ÉCOULÉ', 'La partie est terminée !');
+  }
+}
+
+function showOverlay(icon, title, sub) {
+  document.getElementById('overlayIcon').textContent = icon;
+  document.getElementById('overlayTitle').textContent = title;
+  document.getElementById('overlaySub').textContent = sub;
+  document.getElementById('overlay').classList.add('show');
+}
+
+/* ════════════════════════════════════════════════════════
+   TIMER
+════════════════════════════════════════════════════════ */
+function startTimer() {
+  clearInterval(timerInterval);
+  const limit = gameSettings.timeLimit;
+  timerInterval = setInterval(() => {
+    elapsed++;
+    const left = limit - elapsed;
+    document.getElementById('statTimer').textContent = left > 0 ? left : '0';
+    if (left <= 0) {
+      clearInterval(timerInterval);
+      if (isHost) {
+        revealAllMines();
+        const r = { type: 'game_over', reason: 'timeout' };
+        broadcastToGuests(r);
+        handleGameOver(r);
+      }
+    }
+    if (left <= 10 && left > 0) document.getElementById('statTimer').classList.add('red');
+  }, 1000);
+}
+
+/* ════════════════════════════════════════════════════════
+   STATS / SCOREBOARD
+════════════════════════════════════════════════════════ */
+function updateStatMines() {
+  const { gw, gh, mines } = gameSettings;
+  let flags = 0;
+  if (board.length) {
+    for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) if (board[r][c].flagged) flags++;
+  }
+  document.getElementById('statMines').textContent = mines - flags;
+  document.getElementById('statFlags').textContent = flags;
+}
+
+function refreshScoreboard() {
+  const sb = document.getElementById('scoreboard');
+  sb.innerHTML = '';
+  Object.values(scores).forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'score-chip';
+    chip.innerHTML = `<div class="chip-dot" style="background:${s.color}"></div>${esc(s.name)}: ${s.reveals}`;
+    sb.appendChild(chip);
+  });
+}
+
+/* ════════════════════════════════════════════════════════
+   CURSORS
+════════════════════════════════════════════════════════ */
+function onMouseMove(e) {
+  if (!gameActive) return;
+  const wrapper = document.getElementById('gridWrapper');
+  const rect = wrapper.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 100;
+  const y = ((e.clientY - rect.top) / rect.height) * 100;
+  const msg = { type: 'cursor', x, y, name: myName };
+  if (isHost) broadcastToGuests(msg);
+  else if (hostConn) hostConn.send(msg);
+}
+
+function updateRemoteCursor(peerId, x, y, name) {
+  const wrapper = document.getElementById('gridWrapper');
+  if (!remoteCursors[peerId]) {
+    const el = document.createElement('div');
+    el.className = 'remote-cursor';
+    const color = (scores[name] || {}).color || '#fff';
+    el.innerHTML = `<div class="cursor-arrow" style="border-bottom-color:${color}"></div><div class="cursor-name" style="color:${color}">${esc(name)}</div>`;
+    wrapper.appendChild(el);
+    remoteCursors[peerId] = el;
+  }
+  remoteCursors[peerId].style.left = x + '%';
+  remoteCursors[peerId].style.top = y + '%';
+}
+
+function removeRemoteCursor(peerId) {
+  if (remoteCursors[peerId]) {
+    remoteCursors[peerId].remove();
+    delete remoteCursors[peerId];
+  }
+}
+
+function clearAllCursors() {
+  Object.keys(remoteCursors).forEach(removeRemoteCursor);
+}
+
+/* ════════════════════════════════════════════════════════
+   LEAVE
+════════════════════════════════════════════════════════ */
+function leaveLobby() {
+  clearInterval(timerInterval);
+  gameActive = false; gameOver = false;
+  document.getElementById('overlay').classList.remove('show');
+  clearAllCursors();
+
+  if (isHost) {
+    broadcastToGuests({ type: 'game_over', reason: 'host_left' });
+    removeLobby();
+    Object.values(guestConns).forEach(c => c.close());
+    guestConns = {};
+  } else {
+    if (hostConn) hostConn.close();
+    hostConn = null;
+  }
+  if (myPeer && !myPeer.destroyed) { myPeer.destroy(); myPeer = null; }
+  scores = {}; board = []; remoteCursors = {};
+  showScreen('menuScreen');
+}
+</script>
+</body>
+</html>
