@@ -29,15 +29,22 @@
     --num7: #f472b6; --num8: #a3a3a3;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+  }
   body {
     background: var(--bg);
     color: var(--text);
     font-family: 'Share Tech Mono', monospace;
-    min-height: 100vh;
+    overflow-y: auto;
     overflow-x: hidden;
   }
+  body.game-active {
+    overflow: hidden;
+    height: 100%;
+  }
   /* ── SCREENS ─────────────────────── */
-  .screen { display: none; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .screen { display: none; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; min-height: 100svh; padding: 20px; }
   .screen.active { display: flex; }
 
   /* ── TITLE ───────────────────────── */
@@ -146,8 +153,12 @@
   }
 
   /* ── GAME SCREEN ─────────────────── */
-  #gameScreen { padding: 0; justify-content: flex-start; min-height: 100vh; }
-  #gameScreen.active { display: flex; flex-direction: column; }
+  #gameScreen { padding: 0; justify-content: flex-start; min-height: unset; }
+  #gameScreen.active {
+    display: flex; flex-direction: column;
+    height: 100%; height: 100svh;
+    overflow: hidden;
+  }
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: var(--panel);
@@ -175,13 +186,17 @@
   /* ── GRID AREA ───────────────────── */
   .game-area {
     flex: 1;
-    overflow: auto;
+    overflow: hidden;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    padding: 16px;
     position: relative;
-    box-sizing: border-box;
+    touch-action: none;
+  }
+  .pan-container {
+    position: absolute;
+    transform-origin: top left;
+    will-change: transform;
   }
   .grid-wrapper { position: relative; display: inline-block; user-select: none; }
   #gameGrid {
@@ -292,25 +307,6 @@
     background: rgba(249,115,22,.1);
   }
   #modeToggleBtn .mode-icon { font-size: 18px; }
-
-  /* ── PAN CONTAINER ───────────────── */
-  .game-area {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 16px;
-    position: relative;
-    box-sizing: border-box;
-    touch-action: none;
-  }
-  .pan-container {
-    position: relative;
-    transform-origin: top left;
-    will-change: transform;
-  }
-  .grid-wrapper { position: relative; display: inline-block; user-select: none; }
 
   .section-title { font-family: 'Teko', sans-serif; font-size: 18px; letter-spacing: 2px; color: var(--muted); margin-bottom: 12px; }
   .divider { height: 1px; background: var(--border); margin: 16px 0; }
@@ -947,19 +943,21 @@ function startGameHost() {
   firstClick = true;
   gameActive = true; gameOver = false;
   elapsed = 0;
-  buildGameGrid();
+  document.body.classList.add('game-active');
   showScreen('gameScreen');
+  buildGameGrid();
   refreshScoreboard();
   if (gameSettings.timeLimit > 0) startTimer();
   updateStatMines();
 }
 
 function startGameClient() {
-  firstClick = false; // host handles board gen on first click
+  firstClick = false;
   gameActive = true; gameOver = false;
   elapsed = 0;
-  buildGameGrid();
+  document.body.classList.add('game-active');
   showScreen('gameScreen');
+  buildGameGrid();
   refreshScoreboard();
   if (gameSettings.timeLimit > 0) startTimer();
   updateStatMines();
@@ -974,27 +972,30 @@ function buildGameGrid() {
   const { gw, gh } = gameSettings;
   const grid = document.getElementById('gameGrid');
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
+  const area = document.getElementById('gameArea');
+  const toolbar = document.getElementById('mobileToolbar');
 
-  // On mobile: fixed cell size (34px) and allow panning
-  // On desktop: shrink-to-fit
-  let cellSize, fontSize;
-  if (isMobile) {
-    cellSize = 34;
-    fontSize = 14;
-  } else {
-    const topbarH = (document.querySelector('.topbar')?.offsetHeight || 56) + 32;
-    const availW = window.innerWidth - 32;
-    const availH = window.innerHeight - topbarH;
-    cellSize = Math.max(22, Math.min(36, Math.floor(availW / gw), Math.floor(availH / gh)));
-    fontSize = Math.max(11, Math.floor(cellSize * 0.52));
-  }
+  // Available space (subtract padding)
+  const pad = 16;
+  const areaW = area.offsetWidth - pad * 2;
+  const areaH = area.offsetHeight - (toolbar && toolbar.offsetHeight > 0 ? 0 : 0) - pad * 2;
+
+  // Calculate cell size that fits the grid entirely in the visible area
+  const fitW = Math.floor(areaW / gw);
+  const fitH = Math.floor(areaH / gh);
+  // On mobile: try to fit, but never smaller than 22px
+  // On desktop: same logic, never smaller than 18px, never bigger than 36px
+  const minCell = isMobile ? 22 : 18;
+  const maxCell = 36;
+  const cellSize = Math.max(minCell, Math.min(maxCell, fitW, fitH));
+  const fontSize = Math.max(10, Math.floor(cellSize * 0.52));
 
   let dynStyle = document.getElementById('dynamicCellStyle');
   if (!dynStyle) { dynStyle = document.createElement('style'); dynStyle.id = 'dynamicCellStyle'; document.head.appendChild(dynStyle); }
   dynStyle.textContent = `
     #gameGrid .cell { width: ${cellSize}px !important; height: ${cellSize}px !important; font-size: ${fontSize}px !important; line-height: 1 !important; }
-    #gameGrid .cell.flagged::after { font-size: ${Math.max(11, fontSize - 1)}px !important; }
-    #gameGrid .cell.mine-show::after { font-size: ${Math.max(11, fontSize - 1)}px !important; }
+    #gameGrid .cell.flagged::after { font-size: ${Math.max(10, fontSize - 1)}px !important; }
+    #gameGrid .cell.mine-show::after { font-size: ${Math.max(10, fontSize - 1)}px !important; }
   `;
 
   grid.style.gridTemplateColumns = `repeat(${gw}, ${cellSize}px)`;
@@ -1005,7 +1006,6 @@ function buildGameGrid() {
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.dataset.r = r; cell.dataset.c = c;
-      // Desktop only: click + right-click (mobile handled by pan layer)
       if (!isMobile) {
         cell.addEventListener('click', onCellClick);
         cell.addEventListener('contextmenu', onCellRightClick);
@@ -1014,14 +1014,18 @@ function buildGameGrid() {
     }
   }
 
-  // Reset pan
-  panX = 0; panY = 0;
+  // Center the pan container initially
+  const gridPxW = gw * cellSize + (gw - 1) * 2;
+  const gridPxH = gh * cellSize + (gh - 1) * 2;
+  panX = Math.round((area.offsetWidth - gridPxW) / 2);
+  panY = Math.round((area.offsetHeight - gridPxH) / 2);
+  // Ensure it's not negative (if grid bigger than area, start at 0)
+  panX = Math.max(0, panX);
+  panY = Math.max(0, panY);
   applyPan();
 
-  // Setup pan+tap handler on gameArea
   setupPan(isMobile);
 
-  // Mouse tracking for cursors (desktop)
   if (!isMobile) {
     const wrapper = document.getElementById('gridWrapper');
     wrapper.addEventListener('mousemove', onMouseMove);
@@ -1036,12 +1040,18 @@ function applyPan() {
 
 function setupPan(isMobile) {
   const area = document.getElementById('gameArea');
-  if (!isMobile) return; // desktop uses normal scroll/click
+  if (!isMobile) return;
+
+  // Remove old listeners by replacing the element
+  const newArea = area.cloneNode(false);
+  while (area.firstChild) newArea.appendChild(area.firstChild);
+  area.parentNode.replaceChild(newArea, area);
+  newArea.id = 'gameArea';
 
   let startX = 0, startY = 0, startPanX = 0, startPanY = 0, moved = false;
-  const THRESHOLD = 8;
+  const THRESHOLD = 6;
 
-  area.addEventListener('touchstart', e => {
+  newArea.addEventListener('touchstart', e => {
     if (e.touches.length !== 1) return;
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
@@ -1050,7 +1060,7 @@ function setupPan(isMobile) {
     moved = false;
   }, { passive: true });
 
-  area.addEventListener('touchmove', e => {
+  newArea.addEventListener('touchmove', e => {
     if (e.touches.length !== 1) return;
     const dx = e.touches[0].clientX - startX;
     const dy = e.touches[0].clientY - startY;
@@ -1063,16 +1073,20 @@ function setupPan(isMobile) {
       const gridH = container ? container.offsetHeight : 0;
       const areaW = areaEl ? areaEl.offsetWidth : window.innerWidth;
       const areaH = areaEl ? areaEl.offsetHeight : window.innerHeight;
-      const minX = Math.min(0, areaW - gridW - 16);
-      const minY = Math.min(0, areaH - gridH - 16);
-      panX = Math.max(minX, Math.min(16, startPanX + dx));
-      panY = Math.max(minY, Math.min(16, startPanY + dy));
+      // Allow panning with margins: grid edge can go 40px past the area edge
+      const margin = 40;
+      const minX = Math.min(0, areaW - gridW - margin);
+      const maxX = margin;
+      const minY = Math.min(0, areaH - gridH - margin);
+      const maxY = margin;
+      panX = Math.max(minX, Math.min(maxX, startPanX + dx));
+      panY = Math.max(minY, Math.min(maxY, startPanY + dy));
       applyPan();
     }
   }, { passive: false });
 
-  area.addEventListener('touchend', e => {
-    if (moved) return; // was pan, ignore
+  newArea.addEventListener('touchend', e => {
+    if (moved) return;
     const touch = e.changedTouches[0];
     const el = document.elementFromPoint(touch.clientX, touch.clientY);
     if (!el) return;
@@ -1085,7 +1099,8 @@ function setupPan(isMobile) {
       if (navigator.vibrate) navigator.vibrate(30);
     } else {
       if (!gameActive || gameOver) return;
-      if (board[r] && board[r][c] && (board[r][c].flagged || board[r][c].revealed)) return;
+      if (!board[r] || !board[r][c]) return;
+      if (board[r][c].flagged || board[r][c].revealed) return;
       if (isHost) {
         if (firstClick) {
           firstClick = false;
@@ -1400,6 +1415,7 @@ function clearAllCursors() {
 function leaveLobby() {
   clearInterval(timerInterval);
   gameActive = false; gameOver = false;
+  document.body.classList.remove('game-active');
   mobileMode = 'dig';
   const btn = document.getElementById('modeToggleBtn');
   if (btn) { btn.classList.remove('flag-mode'); btn.querySelector('.mode-icon').textContent = '⛏️'; document.getElementById('modeLabel').textContent = 'CREUSER'; }
