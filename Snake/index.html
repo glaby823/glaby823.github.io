@@ -49,13 +49,12 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .notif-success{background:rgba(0,255,136,.15);border-color:rgba(0,255,136,.45);color:#00ff88;}
 .notif-warn{background:rgba(255,170,0,.15);border-color:rgba(255,170,0,.45);color:#ffaa00;}
 .notif-danger{background:rgba(255,68,68,.15);border-color:rgba(255,68,68,.45);color:#ff6666;}
-.hub{text-align: center;}
 #myId{font-size:.66rem;color:var(--muted);margin-top:4px;}
 </style>
 </head>
 <body>
 <header>
-  <div class="logo">🐍 SNAKE <span>P2P</span> <a href="../index.html" class="hub">LE HUB</a></div>
+  <div class="logo">🐍 SNAKE <span><a href="../index.html">P2P</a></span></div>
   <span class="badge wait" id="badge">⬤ démarrage...</span>
 </header>
 <div id="notifStack"></div>
@@ -90,7 +89,8 @@ const FIREBASE_CFG = {
 };
 // ─────────────────────────────────────────────────────────────
 // REGISTRE DE LOBBIES via Firebase Realtime Database
-// Chaque lobby = /lobbies/{peerId} = {id, name, host, players, maxPlayers, gw, gh, status, ts}
+// Chemin : games/snake/lobbies/{peerId}
+// Chaque lobby = {id, name, host, players, maxPlayers, gw, gh, status, ts}
 // TTL : les entrées > 15s sans heartbeat sont ignorées côté client
 // ─────────────────────────────────────────────────────────────
 let fbApp = null, fbDb = null, fbRef = null;
@@ -99,7 +99,7 @@ function initFirebase() {
   try {
     fbApp = firebase.initializeApp(FIREBASE_CFG);
     fbDb  = firebase.database();
-    fbRef = fbDb.ref('lobbies');
+    fbRef = fbDb.ref('games/snake/lobbies');
     return true;
   } catch(e) {
     console.warn('Firebase non disponible, fallback localStorage:', e);

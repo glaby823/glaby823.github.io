@@ -203,7 +203,8 @@ const FIREBASE_CFG = {
 };
 // ─────────────────────────────────────────────────────────────
 // REGISTRE DE LOBBIES via Firebase Realtime Database
-// Chaque lobby = /lobbies/{peerId} = {id, name, host, players, maxPlayers, gw, gh, status, ts}
+// Chemin : games/snake/lobbies/{peerId}
+// Chaque lobby = {id, name, host, players, maxPlayers, gw, gh, status, ts}
 // TTL : les entrées > 15s sans heartbeat sont ignorées côté client
 // ─────────────────────────────────────────────────────────────
 let fbApp = null, fbDb = null, fbRef = null;
@@ -212,7 +213,7 @@ function initFirebase() {
   try {
     fbApp = firebase.initializeApp(FIREBASE_CFG);
     fbDb  = firebase.database();
-    fbRef = fbDb.ref('lobbies');
+    fbRef = fbDb.ref('games/snake/lobbies');
     return true;
   } catch(e) {
     console.warn('Firebase non disponible, fallback localStorage:', e);
