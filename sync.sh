@@ -1,0 +1,1 @@
+git checkout --theirs . && git add . && git commit -m "Fusion avec remote" && git push origin main
