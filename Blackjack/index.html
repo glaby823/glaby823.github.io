@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>♠ BlackJack Royale</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+  <style>
+    /* ── FONTS ── */
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Cinzel:wght@400;600&family=IM+Fell+English:ital@0;1&display=swap');
+
+    /* ── VARIABLES ── */
+    :root {
+      --felt:       #0a3d1f;
+      --felt-light: #0e5229;
+      --felt-dark:  #071a0d;
+      --gold:       #c9952a;
+      --gold-light: #e8b84b;
+      --gold-dim:   #7a5a1a;
+      --cream:      #f5e6c8;
+      --red:        #c0392b;
+      --red-dark:   #8e1a12;
+      --black-card: #1a1a1a;
+      --chip-blue:  #2980b9;
+      --chip-green: #27ae60;
+      --chip-black: #1a1a1a;
+      --shadow:     rgba(0,0,0,0.7);
+      --glow:       rgba(201,149,42,0.35);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Cinzel', serif;
+      background: var(--felt-dark);
+      color: var(--cream);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(ellipse 80% 60% at 50% 0%, #0e5229 0%, transparent 70%),
+        repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.01) 10px, rgba(255,255,255,0.01) 20px);
+    }
+
+    /* ══════════════ LOBBY ══════════════ */
+    #lobby {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo h1 {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: clamp(2rem, 6vw, 4rem);
+      color: var(--gold);
+      text-shadow: 0 0 40px var(--glow), 2px 2px 0 var(--gold-dim);
+      letter-spacing: 4px;
+    }
+    .logo p {
+      font-family: 'IM Fell English', serif;
+      font-style: italic;
+      color: var(--gold-dim);
+      font-size: 1.1rem;
+      margin-top: 4px;
+    }
+    .suits {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      font-size: 2rem;
+      margin-top: 8px;
+      opacity: 0.6;
+    }
+    .suits span:nth-child(1), .suits span:nth-child(4) { color: var(--cream); }
+    .suits span:nth-child(2), .suits span:nth-child(3) { color: var(--red); }
+
+    /* ── LOBBY GRID ── */
+    .lobby-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 800px;
+      width: 100%;
+    }
+    @media (max-width: 600px) { .lobby-grid { grid-template-columns: 1fr; } }
+
+    /* ── PANEL ── */
+    .panel {
+      background: linear-gradient(145deg, rgba(14,82,41,0.7), rgba(7,26,13,0.9));
+      border: 1px solid var(--gold-dim);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(201,149,42,0.15);
+    }
+    .panel h2 {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: 1rem;
+      color: var(--gold);
+      border-bottom: 1px solid var(--gold-dim);
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    /* ── INPUTS ── */
+    .input-group { margin-bottom: 14px; }
+    .input-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--gold-dim);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+    }
+    .input-group input, .input-group select {
+      width: 100%;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--gold-dim);
+      border-radius: 6px;
+      color: var(--cream);
+      padding: 10px 14px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input-group input:focus, .input-group select:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 12px var(--glow);
+    }
+    .input-group select option { background: #0a2a12; }
+
+    /* ── BUTTONS ── */
+    .btn {
+      display: inline-block;
+      font-family: 'Cinzel', serif;
+      font-weight: 600;
+      font-size: 0.85rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0);
+      transition: background 0.15s;
+    }
+    .btn:hover::after { background: rgba(255,255,255,0.06); }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-gold {
+      background: linear-gradient(135deg, var(--gold-dim), var(--gold), var(--gold-dim));
+      color: #1a0e00;
+      box-shadow: 0 4px 16px rgba(201,149,42,0.4);
+      width: 100%;
+    }
+    .btn-gold:hover { box-shadow: 0 6px 24px rgba(201,149,42,0.6); }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--gold-dim);
+      color: var(--gold);
+      width: 100%;
+      margin-top: 8px;
+    }
+    .btn-outline:hover { border-color: var(--gold); background: rgba(201,149,42,0.06); }
+
+    .btn-red {
+      background: linear-gradient(135deg, var(--red-dark), var(--red), var(--red-dark));
+      color: var(--cream);
+      box-shadow: 0 4px 12px rgba(192,57,43,0.35);
+    }
+    .btn-red:hover { box-shadow: 0 6px 20px rgba(192,57,43,0.55); }
+
+    .btn-sm { padding: 7px 14px; font-size: 0.75rem; }
+
+    /* ── GAME LIST ── */
+    #game-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    #game-list::-webkit-scrollbar { width: 4px; }
+    #game-list::-webkit-scrollbar-track { background: transparent; }
+    #game-list::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 4px; }
+
+    .game-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(201,149,42,0.2);
+      border-radius: 6px;
+      padding: 10px 14px;
+      transition: border-color 0.2s;
+    }
+    .game-item:hover { border-color: var(--gold-dim); }
+    .game-item .info { flex: 1; }
+    .game-item .info strong { font-size: 0.9rem; color: var(--cream); display: block; }
+    .game-item .info span { font-size: 0.75rem; color: var(--gold-dim); font-family: 'IM Fell English', serif; }
+    .badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: 8px;
+      font-family: 'Cinzel', serif;
+      letter-spacing: 1px;
+    }
+    .badge-waiting { background: var(--gold-dim); color: #1a0e00; }
+    .badge-full { background: var(--red-dark); color: var(--cream); }
+
+    .no-games {
+      text-align: center;
+      color: var(--gold-dim);
+      font-family: 'IM Fell English', serif;
+      font-style: italic;
+      font-size: 0.95rem;
+      padding: 20px;
+    }
+
+    .refresh-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .refresh-row span {
+      font-size: 0.72rem;
+      color: var(--gold-dim);
+      letter-spacing: 1px;
+    }
+
+    /* ── STATUS BAR ── */
+    #status-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: rgba(7,26,13,0.95);
+      border-top: 1px solid var(--gold-dim);
+      padding: 8px 20px;
+      font-size: 0.75rem;
+      color: var(--gold-dim);
+      text-align: center;
+      letter-spacing: 1px;
+      z-index: 1000;
+    }
+    #status-bar.error { color: #e74c3c; }
+    #status-bar.success { color: #2ecc71; }
+
+    /* ══════════════ WAITING ROOM ══════════════ */
+    #waiting-room {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .waiting-box {
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+    }
+    .waiting-box h2 {
+      font-family: 'Cinzel Decorative', cursive;
+      color: var(--gold);
+      font-size: 1.5rem;
+      margin-bottom: 6px;
+    }
+    .waiting-box p { color: var(--gold-dim); font-family: 'IM Fell English', serif; font-style: italic; margin-bottom: 30px; }
+
+    .players-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .player-slot {
+      background: rgba(0,0,0,0.35);
+      border: 1px dashed var(--gold-dim);
+      border-radius: 8px;
+      padding: 16px 12px;
+      text-align: center;
+      transition: all 0.3s;
+    }
+    .player-slot.filled {
+      border: 1px solid var(--gold);
+      background: rgba(201,149,42,0.08);
+    }
+    .player-slot.me { border-color: var(--gold-light); box-shadow: 0 0 16px var(--glow); }
+    .player-slot .avatar { font-size: 2rem; margin-bottom: 6px; }
+    .player-slot .name { font-size: 0.8rem; color: var(--cream); word-break: break-all; }
+    .player-slot .role { font-size: 0.65rem; color: var(--gold-dim); letter-spacing: 1px; margin-top: 2px; }
+    .empty-slot { color: var(--gold-dim); font-family: 'IM Fell English', serif; font-style: italic; font-size: 0.85rem; }
+
+    .room-code {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--gold-dim);
+      border-radius: 8px;
+      padding: 12px 20px;
+      margin-bottom: 24px;
+      display: inline-block;
+    }
+    .room-code span { font-size: 0.7rem; color: var(--gold-dim); letter-spacing: 2px; display: block; margin-bottom: 2px; }
+    .room-code strong { font-size: 1.4rem; letter-spacing: 6px; color: var(--gold); font-family: 'Cinzel Decorative', cursive; }
+
+    /* ══════════════ GAME TABLE ══════════════ */
+    #game-screen {
+      display: none;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .table-header h2 {
+      font-family: 'Cinzel Decorative', cursive;
+      color: var(--gold);
+      font-size: 1.2rem;
+    }
+    .round-badge {
+      background: rgba(201,149,42,0.15);
+      border: 1px solid var(--gold-dim);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 0.75rem;
+      color: var(--gold);
+      letter-spacing: 2px;
+    }
+
+    /* ── FELT TABLE ── */
+    .felt-table {
+      background:
+        radial-gradient(ellipse 70% 60% at 50% 40%, #1a6b38 0%, #0d4821 50%, #082a13 100%);
+      border: 3px solid var(--gold-dim);
+      border-radius: 160px;
+      padding: 30px 20px;
+      position: relative;
+      box-shadow: 0 0 0 8px #071a0d, 0 0 0 10px var(--gold-dim), 0 20px 60px rgba(0,0,0,0.8);
+      min-height: 300px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .table-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      pointer-events: none;
+      opacity: 0.12;
+    }
+    .table-label h3 {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: clamp(1.2rem, 3vw, 2rem);
+      color: var(--gold);
+      letter-spacing: 4px;
+    }
+    .table-label p { font-size: 0.7rem; color: var(--gold); letter-spacing: 3px; }
+
+    /* ── DEALER ZONE ── */
+    .dealer-zone {
+      width: 100%;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .zone-label {
+      font-size: 0.65rem;
+      letter-spacing: 3px;
+      color: rgba(245,230,200,0.4);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    /* ── CARDS ── */
+    .hand {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      min-height: 100px;
+    }
+
+    .card {
+      width: 72px;
+      height: 100px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 5px 6px;
+      font-family: 'Cinzel', serif;
+      font-size: 1rem;
+      font-weight: 600;
+      box-shadow: 2px 4px 12px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.6);
+      position: relative;
+      transition: transform 0.15s;
+      user-select: none;
+    }
+    .card:hover { transform: translateY(-4px); }
+    .card.red { background: #fff; color: var(--red); }
+    .card.black { background: #fff; color: var(--black-card); }
+    .card.face-down {
+      background:
+        repeating-linear-gradient(135deg, #1a3a8c 0px, #1a3a8c 6px, #2244aa 6px, #2244aa 12px);
+      border: 2px solid #c8a84b;
+      color: transparent;
+    }
+    .card.face-down .suit-big { display: none; }
+
+    .card .top-left, .card .bottom-right {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1;
+      font-size: 0.75rem;
+    }
+    .card .bottom-right { transform: rotate(180deg); }
+    .card .suit-big {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1.8rem;
+      opacity: 0.15;
+    }
+
+    /* ── SCORE BADGE ── */
+    .score-badge {
+      display: inline-block;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid var(--gold-dim);
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-size: 0.8rem;
+      color: var(--gold);
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+    .score-badge.bust { border-color: var(--red); color: var(--red); }
+    .score-badge.blackjack { border-color: var(--gold-light); color: var(--gold-light); box-shadow: 0 0 8px var(--glow); }
+
+    /* ── PLAYERS ROW ── */
+    .players-row {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .player-area {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(201,149,42,0.2);
+      border-radius: 10px;
+      padding: 12px 14px;
+      min-width: 160px;
+      flex: 1;
+      max-width: 220px;
+      text-align: center;
+      position: relative;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    .player-area.active-turn {
+      border-color: var(--gold);
+      box-shadow: 0 0 20px var(--glow);
+    }
+    .player-area.busted { border-color: var(--red); opacity: 0.6; }
+    .player-area.stood { border-color: var(--chip-blue); }
+    .player-area.winner { border-color: #2ecc71; box-shadow: 0 0 20px rgba(46,204,113,0.3); }
+
+    .player-name-tag {
+      font-size: 0.75rem;
+      letter-spacing: 1px;
+      color: var(--cream);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .player-name-tag .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--gold-dim);
+    }
+    .player-name-tag .dot.active { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+    .player-name-tag .dot.busted { background: var(--red); }
+    .player-name-tag .dot.stood { background: var(--chip-blue); }
+
+    /* ── CHIPS ── */
+    .chips-display {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      margin-bottom: 8px;
+      font-size: 0.75rem;
+      color: var(--gold);
+    }
+    .chip {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.55rem;
+      font-weight: 700;
+      border: 2px dashed rgba(255,255,255,0.4);
+    }
+    .chip-25  { background: #27ae60; }
+    .chip-50  { background: #2980b9; }
+    .chip-100 { background: #8e44ad; }
+    .chip-500 { background: #c0392b; }
+
+    /* ── ACTION PANEL ── */
+    .action-panel {
+      background: linear-gradient(145deg, rgba(7,26,13,0.95), rgba(0,0,0,0.8));
+      border: 1px solid var(--gold-dim);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .action-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .action-row .btn { flex: 1; min-width: 100px; max-width: 160px; }
+
+    .bet-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .bet-chip {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      font-family: 'Cinzel', serif;
+      cursor: pointer;
+      border: 3px dashed rgba(255,255,255,0.5);
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+    }
+    .bet-chip:hover { transform: scale(1.1) translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.6); }
+    .bet-chip:active { transform: scale(0.95); }
+
+    .bet-amount {
+      font-size: 1.1rem;
+      color: var(--gold);
+      font-family: 'Cinzel Decorative', cursive;
+      min-width: 80px;
+      text-align: center;
+    }
+    .my-balance { font-size: 0.75rem; color: var(--gold-dim); letter-spacing: 1px; }
+
+    /* ── RESULT OVERLAY ── */
+    #result-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+    #result-overlay.show { display: flex; }
+
+    .result-box {
+      background: linear-gradient(145deg, #0e5229, #071a0d);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      max-width: 450px;
+      box-shadow: 0 0 60px var(--glow);
+      animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes popIn { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    .result-emoji { font-size: 4rem; margin-bottom: 10px; }
+    .result-title {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+    .result-title.win  { color: var(--gold-light); text-shadow: 0 0 30px var(--glow); }
+    .result-title.lose { color: var(--red); }
+    .result-title.push { color: #7f8c8d; }
+    .result-sub { font-family: 'IM Fell English', serif; font-style: italic; color: var(--gold-dim); margin-bottom: 24px; }
+
+    /* ── MESSAGE LOG ── */
+    #message-log {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(201,149,42,0.15);
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 120px;
+      overflow-y: auto;
+      font-family: 'IM Fell English', serif;
+      font-size: 0.85rem;
+      color: var(--gold-dim);
+    }
+    #message-log::-webkit-scrollbar { width: 3px; }
+    #message-log::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+    .log-entry.important { color: var(--gold); font-style: italic; }
+
+    /* ── HELPER ── */
+    .hidden { display: none !important; }
+    .text-center { text-align: center; }
+    .mt-8 { margin-top: 8px; }
+    .mt-16 { margin-top: 16px; }
+
+    /* ── SEPARATOR ── */
+    .ornament {
+      text-align: center;
+      color: var(--gold-dim);
+      font-size: 1.1rem;
+      letter-spacing: 8px;
+      margin: 8px 0;
+    }
+
+    /* ── LOADING SPINNER ── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--gold-dim);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── TURN TIMER ── */
+    .turn-timer {
+      font-size: 0.7rem;
+      color: var(--gold-dim);
+      letter-spacing: 2px;
+      text-align: center;
+    }
+    .timer-bar-wrap {
+      background: rgba(0,0,0,0.4);
+      border-radius: 4px;
+      height: 4px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .timer-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+      border-radius: 4px;
+      transition: width 1s linear, background 1s;
+    }
+    .timer-bar.urgent { background: linear-gradient(90deg, var(--red-dark), var(--red)); }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════ LOBBY ══════════════ -->
+<div id="lobby">
+  <div class="logo">
+    <h1>BlackJack Royale</h1>
+    <div class="suits"><span>♠</span><span>♥</span><span>♦</span><span>♣</span></div>
+    <p>Jeu de cartes en ligne, entre amis</p>
+  </div>
+
+  <div class="lobby-grid">
+    <!-- Create game -->
+    <div class="panel">
+      <h2>⚔ Nouvelle Table</h2>
+      <div class="input-group">
+        <label>Votre Pseudo</label>
+        <input type="text" id="create-name" placeholder="ex: LeMaître" maxlength="16" />
+      </div>
+      <div class="input-group">
+        <label>Nom de la table</label>
+        <input type="text" id="room-name" placeholder="ex: Table du Roi" maxlength="24" />
+      </div>
+      <div class="input-group">
+        <label>Joueurs max (2–6)</label>
+        <select id="max-players">
+          <option value="2">2 joueurs</option>
+          <option value="3">3 joueurs</option>
+          <option value="4" selected>4 joueurs</option>
+          <option value="5">5 joueurs</option>
+          <option value="6">6 joueurs</option>
+        </select>
+      </div>
+      <div class="ornament">✦ ✦ ✦</div>
+      <button class="btn btn-gold" onclick="createGame()">Ouvrir la table</button>
+    </div>
+
+    <!-- Join game -->
+    <div class="panel">
+      <h2>🃏 Rejoindre</h2>
+      <div class="refresh-row">
+        <span>TABLES OUVERTES</span>
+        <button class="btn btn-outline btn-sm" onclick="refreshGames()" style="width:auto">↻ Actualiser</button>
+      </div>
+      <div id="game-list">
+        <p class="no-games">Chargement… <span class="spinner"></span></p>
+      </div>
+      <div class="ornament mt-8">✦</div>
+      <div class="input-group mt-8">
+        <label>Pseudo pour rejoindre</label>
+        <input type="text" id="join-name" placeholder="ex: LeChanceux" maxlength="16" />
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ WAITING ROOM ══════════════ -->
+<div id="waiting-room">
+  <div class="waiting-box panel">
+    <h2>♠ Salle d'attente</h2>
+    <p id="waiting-sub">En attente des autres joueurs…</p>
+
+    <div class="room-code">
+      <span>CODE DE LA TABLE</span>
+      <strong id="room-code-display">----</strong>
+    </div>
+
+    <div id="waiting-players" class="players-grid"></div>
+
+    <div id="host-controls" class="hidden">
+      <button class="btn btn-gold" id="start-btn" onclick="startGame()" disabled>
+        Lancer la partie
+      </button>
+      <button class="btn btn-outline mt-8" onclick="leaveGame()">Quitter</button>
+    </div>
+    <div id="guest-controls" class="hidden">
+      <button class="btn btn-outline" onclick="leaveGame()">Quitter</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ GAME SCREEN ══════════════ -->
+<div id="game-screen">
+  <div class="table-header">
+    <h2 id="game-title">♠ BlackJack Royale</h2>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="round-badge" id="round-badge">PHASE DE MISE</span>
+      <button class="btn btn-outline btn-sm" onclick="leaveGame()">✕ Quitter</button>
+    </div>
+  </div>
+
+  <!-- FELT TABLE -->
+  <div class="felt-table">
+    <div class="table-label">
+      <h3>BlackJack Royale</h3>
+      <p>BLACKJACK PAYS 3 CONTRE 2</p>
+    </div>
+
+    <!-- Dealer -->
+    <div class="dealer-zone">
+      <div class="zone-label">— Croupier —</div>
+      <div class="hand" id="dealer-hand"></div>
+      <div id="dealer-score" class="score-badge hidden">0</div>
+    </div>
+
+    <!-- Players -->
+    <div class="players-row" id="players-row"></div>
+  </div>
+
+  <!-- Log -->
+  <div id="message-log"></div>
+
+  <!-- Actions -->
+  <div class="action-panel mt-8">
+    <!-- Betting phase -->
+    <div id="bet-phase">
+      <div style="text-align:center;margin-bottom:8px">
+        <span class="zone-label">VOTRE MISE</span>
+        <div class="bet-amount" id="current-bet-display">0 💰</div>
+        <div class="my-balance" id="balance-display">Balance : 1000</div>
+      </div>
+      <div class="bet-row">
+        <div class="bet-chip chip-25"  style="background:#27ae60" onclick="addBet(25)">25</div>
+        <div class="bet-chip chip-50"  style="background:#2980b9" onclick="addBet(50)">50</div>
+        <div class="bet-chip chip-100" style="background:#8e44ad" onclick="addBet(100)">100</div>
+        <div class="bet-chip chip-500" style="background:#c0392b" onclick="addBet(500)">500</div>
+        <button class="btn btn-outline btn-sm" onclick="clearBet()" style="width:auto">✕ Reset</button>
+      </div>
+      <div class="action-row mt-8">
+        <button class="btn btn-gold" id="confirm-bet-btn" onclick="confirmBet()">Confirmer la mise</button>
+      </div>
+    </div>
+
+    <!-- Play phase -->
+    <div id="play-phase" class="hidden">
+      <div style="text-align:center;margin-bottom:4px">
+        <div class="turn-timer" id="turn-timer-label">Tour de : —</div>
+        <div class="timer-bar-wrap">
+          <div class="timer-bar" id="timer-bar" style="width:100%"></div>
+        </div>
+      </div>
+      <div class="action-row">
+        <button class="btn btn-gold" id="btn-hit"    onclick="sendAction('hit')">Tirer (Hit)</button>
+        <button class="btn btn-outline" id="btn-stand" onclick="sendAction('stand')">Rester (Stand)</button>
+        <button class="btn btn-red" id="btn-double"  onclick="sendAction('double')">Doubler</button>
+      </div>
+    </div>
+
+    <!-- Waiting for others phase -->
+    <div id="wait-phase" class="hidden text-center">
+      <span class="spinner"></span>
+      <span style="color:var(--gold-dim);font-size:0.85rem;margin-left:8px">En attente des autres joueurs…</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ RESULT OVERLAY ══════════════ -->
+<div id="result-overlay">
+  <div class="result-box">
+    <div class="result-emoji" id="result-emoji">🏆</div>
+    <div class="result-title" id="result-title">Victoire !</div>
+    <div class="result-sub"  id="result-sub">+500 jetons</div>
+    <div id="round-results" style="margin-bottom:16px;font-family:'IM Fell English',serif;font-size:0.9rem;color:var(--gold-dim)"></div>
+    <button class="btn btn-gold" onclick="nextRound()">Prochaine Manche →</button>
+    <button class="btn btn-outline mt-8" onclick="leaveGame()">Quitter la table</button>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div id="status-bar">Connexion à Firebase…</div>
+
+<!-- ══════════════ SCRIPTS ══════════════ -->
+<script>
+/* ══════════════════════════════════════════
+   FIREBASE CONFIG — Remplace les valeurs !
+══════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey: "238847906143",
+  authDomain: "VOTRE_PROJECT.firebaseapp.com",
+  databaseURL: "https://snake-p2p-dca09-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "VOTRE_PROJECT",
+  storageBucket: "VOTRE_PROJECT.appspot.com",
+  messagingSenderId: "VOTRE_SENDER_ID",
+  appId: "VOTRE_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const fbDb = firebase.database();
+const FB_PATH = 'games/blackjak/lobbies';
+
+/* ══════════════════════════════════════════
+   STATE
+══════════════════════════════════════════ */
+let myId       = null;   // peer ID (Firebase push key)
+let myName     = '';
+let roomRef    = null;   // Firebase ref to the current lobby
+let roomKey    = null;
+let isHost     = false;
+let gameState  = null;   // local copy of game state
+let myBalance  = 1000;
+let currentBet = 0;
+let timerInterval = null;
+const TURN_SECONDS = 30;
+
+// card suits/values
+const SUITS  = ['♠','♥','♦','♣'];
+const VALUES = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+
+/* ══════════════════════════════════════════
+   UTILS
+══════════════════════════════════════════ */
+function uid() {
+  return Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+}
+
+function setStatus(msg, type='') {
+  const bar = document.getElementById('status-bar');
+  bar.textContent = msg;
+  bar.className = type;
+}
+
+function addLog(msg, important=false) {
+  const log = document.getElementById('message-log');
+  const el  = document.createElement('div');
+  el.className = 'log-entry' + (important ? ' important' : '');
+  el.textContent = '› ' + msg;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showScreen(id) {
+  ['lobby','waiting-room','game-screen'].forEach(s => {
+    document.getElementById(s).style.display = s === id ? 'flex' : 'none';
+  });
+}
+
+/* ══════════════════════════════════════════
+   DECK
+══════════════════════════════════════════ */
+function buildDeck() {
+  const deck = [];
+  for (const s of SUITS)
+    for (const v of VALUES)
+      deck.push({ suit: s, value: v });
+  return deck;
+}
+
+function shuffle(deck) {
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function cardValue(card) {
+  if (['J','Q','K'].includes(card.value)) return 10;
+  if (card.value === 'A') return 11;
+  return parseInt(card.value);
+}
+
+function handTotal(cards) {
+  let total = 0, aces = 0;
+  for (const c of cards) {
+    total += cardValue(c);
+    if (c.value === 'A') aces++;
+  }
+  while (total > 21 && aces > 0) { total -= 10; aces--; }
+  return total;
+}
+
+function isSoftHand(cards) {
+  let total = 0, aces = 0;
+  for (const c of cards) {
+    total += cardValue(c);
+    if (c.value === 'A') aces++;
+  }
+  // count as soft if there's an ace counted as 11
+  return aces > 0 && total <= 21 && (total - 10) <= 21;
+}
+
+/* ══════════════════════════════════════════
+   RENDER CARD
+══════════════════════════════════════════ */
+function renderCard(card, faceDown=false) {
+  const el = document.createElement('div');
+  if (faceDown) {
+    el.className = 'card face-down';
+    el.innerHTML = '';
+    return el;
+  }
+  const isRed = card.suit === '♥' || card.suit === '♦';
+  el.className = 'card ' + (isRed ? 'red' : 'black');
+  el.innerHTML = `
+    <div class="top-left"><span>${card.value}</span><span>${card.suit}</span></div>
+    <div class="suit-big">${card.suit}</div>
+    <div class="bottom-right"><span>${card.value}</span><span>${card.suit}</span></div>
+  `;
+  return el;
+}
+
+/* ══════════════════════════════════════════
+   LOBBY — Firebase
+══════════════════════════════════════════ */
+window.addEventListener('load', () => {
+  // Check Firebase connectivity
+  fbDb.ref('.info/connected').on('value', snap => {
+    if (snap.val()) setStatus('✔ Connecté à Firebase', 'success');
+    else            setStatus('⚠ Hors ligne – reconnexion…', 'error');
+  });
+  refreshGames();
+  setInterval(refreshGames, 5000);
+});
+
+async function refreshGames() {
+  const snap = await fbDb.ref(FB_PATH).get();
+  const list  = document.getElementById('game-list');
+  list.innerHTML = '';
+  const lobbies = snap.val();
+  if (!lobbies) {
+    list.innerHTML = '<p class="no-games">Aucune table ouverte — créez la vôtre !</p>';
+    return;
+  }
+  Object.entries(lobbies).forEach(([key, lobby]) => {
+    if (lobby.status !== 'waiting') return;
+    const players = Object.keys(lobby.players || {}).length;
+    const isFull  = players >= lobby.maxPlayers;
+    const item = document.createElement('div');
+    item.className = 'game-item';
+    item.innerHTML = `
+      <div class="info">
+        <strong>${escHtml(lobby.name)}</strong>
+        <span>${players}/${lobby.maxPlayers} joueurs</span>
+      </div>
+      <span class="badge ${isFull ? 'badge-full' : 'badge-waiting'}">${isFull ? 'PLEINE' : 'OUVERTE'}</span>
+      ${isFull ? '' : `<button class="btn btn-outline btn-sm" style="width:auto;margin-left:10px" onclick="joinGame('${key}')">Rejoindre</button>`}
+    `;
+    list.appendChild(item);
+  });
+  if (!list.children.length)
+    list.innerHTML = '<p class="no-games">Aucune table ouverte — créez la vôtre !</p>';
+}
+
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.appendChild(document.createTextNode(str));
+  return d.innerHTML;
+}
+
+/* ══════════════════════════════════════════
+   CREATE GAME
+══════════════════════════════════════════ */
+async function createGame() {
+  const nameEl = document.getElementById('create-name');
+  const roomEl = document.getElementById('room-name');
+  myName = nameEl.value.trim();
+  const roomName = roomEl.value.trim();
+
+  if (!myName || !roomName) {
+    setStatus('Remplis le pseudo et le nom de table.', 'error'); return;
+  }
+
+  myId  = uid();
+  isHost = true;
+  myBalance = 1000;
+
+  const lobby = {
+    name: roomName,
+    host: myId,
+    maxPlayers: parseInt(document.getElementById('max-players').value),
+    status: 'waiting',
+    createdAt: Date.now(),
+    players: {
+      [myId]: { name: myName, balance: myBalance, ready: false }
+    },
+    gameState: null
+  };
+
+  const ref = fbDb.ref(FB_PATH).push();
+  roomKey = ref.key;
+  roomRef = ref;
+  await ref.set(lobby);
+
+  // Remove lobby on disconnect
+  ref.child('players/' + myId).onDisconnect().remove();
+
+  watchLobby();
+  showScreen('waiting-room');
+  setStatus('Table créée ! En attente de joueurs…', 'success');
+}
+
+/* ══════════════════════════════════════════
+   JOIN GAME
+══════════════════════════════════════════ */
+async function joinGame(key) {
+  const nameEl = document.getElementById('join-name');
+  myName = nameEl.value.trim();
+  if (!myName) { setStatus('Entre ton pseudo avant de rejoindre.', 'error'); return; }
+
+  myId   = uid();
+  isHost = false;
+  myBalance = 1000;
+
+  roomKey = key;
+  roomRef = fbDb.ref(FB_PATH + '/' + key);
+
+  const snap = await roomRef.get();
+  const lobby = snap.val();
+  if (!lobby) { setStatus('Table introuvable.', 'error'); return; }
+
+  const players = Object.keys(lobby.players || {}).length;
+  if (players >= lobby.maxPlayers) { setStatus('Table pleine.', 'error'); return; }
+  if (lobby.status !== 'waiting')  { setStatus('Partie déjà en cours.', 'error'); return; }
+
+  await roomRef.child('players/' + myId).set({ name: myName, balance: myBalance, ready: false });
+  roomRef.child('players/' + myId).onDisconnect().remove();
+
+  watchLobby();
+  showScreen('waiting-room');
+  setStatus('Connecté à la table !', 'success');
+}
+
+/* ══════════════════════════════════════════
+   WATCH LOBBY
+══════════════════════════════════════════ */
+function watchLobby() {
+  roomRef.on('value', snap => {
+    const data = snap.val();
+    if (!data) { leaveGame(); return; }
+
+    // If game started, switch to game
+    if (data.status === 'playing' && data.gameState) {
+      gameState = data.gameState;
+      showScreen('game-screen');
+      renderGame();
+      return;
+    }
+
+    // Waiting room render
+    renderWaitingRoom(data);
+  });
+}
+
+function renderWaitingRoom(data) {
+  document.getElementById('room-code-display').textContent = roomKey.slice(-6).toUpperCase();
+  const wrap = document.getElementById('waiting-players');
+  wrap.innerHTML = '';
+
+  const players = data.players || {};
+  const max     = data.maxPlayers;
+  const count   = Object.keys(players).length;
+  const avatars = ['🎩','🃏','👑','💎','🎲','🌹'];
+  let i = 0;
+
+  Object.entries(players).forEach(([pid, p]) => {
+    const slot = document.createElement('div');
+    slot.className = 'player-slot filled' + (pid === myId ? ' me' : '');
+    slot.innerHTML = `
+      <div class="avatar">${avatars[i % avatars.length]}</div>
+      <div class="name">${escHtml(p.name)}</div>
+      <div class="role">${pid === data.host ? '♚ Hôte' : '♟ Joueur'}</div>
+    `;
+    wrap.appendChild(slot);
+    i++;
+  });
+
+  for (let j = count; j < max; j++) {
+    const slot = document.createElement('div');
+    slot.className = 'player-slot';
+    slot.innerHTML = `<div class="empty-slot">En attente…</div>`;
+    wrap.appendChild(slot);
+  }
+
+  // Host/guest controls
+  if (isHost) {
+    document.getElementById('host-controls').classList.remove('hidden');
+    document.getElementById('guest-controls').classList.add('hidden');
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = count < 2;
+    startBtn.textContent = count < 2 ? `Attendre (${count}/2 min)` : 'Lancer la partie !';
+  } else {
+    document.getElementById('guest-controls').classList.remove('hidden');
+    document.getElementById('host-controls').classList.add('hidden');
+  }
+}
+
+/* ══════════════════════════════════════════
+   START GAME (host only)
+══════════════════════════════════════════ */
+async function startGame() {
+  const snap = await roomRef.get();
+  const data  = snap.val();
+  const players = data.players;
+
+  // Build initial game state
+  const deck   = shuffle(buildDeck().concat(buildDeck())); // 2 decks
+  const pIds   = Object.keys(players);
+
+  const gs = {
+    deck,
+    phase: 'betting',     // betting | playing | dealer | results
+    round: 1,
+    currentTurn: null,
+    turnOrder: pIds,
+    dealer: { cards: [], hiddenCard: null },
+    players: {}
+  };
+
+  pIds.forEach(pid => {
+    gs.players[pid] = {
+      name: players[pid].name,
+      balance: players[pid].balance || 1000,
+      bet: 0,
+      betConfirmed: false,
+      cards: [],
+      status: 'betting', // betting | playing | stood | busted | blackjack | done
+    };
+  });
+
+  await roomRef.update({ status: 'playing', gameState: gs });
+}
+
+/* ══════════════════════════════════════════
+   RENDER GAME
+══════════════════════════════════════════ */
+function renderGame() {
+  const gs = gameState;
+  if (!gs) return;
+
+  document.getElementById('game-title').textContent = '♠ ' + (roomKey.slice(-6).toUpperCase());
+
+  // Phase badge
+  const phaseTxt = { betting:'PHASE DE MISE', playing:'PHASE DE JEU', dealer:'TOUR DU CROUPIER', results:'RÉSULTATS' };
+  document.getElementById('round-badge').textContent = (phaseTxt[gs.phase] || gs.phase) + ' — Manche ' + gs.round;
+
+  // Dealer hand
+  renderDealerHand();
+
+  // Players
+  renderPlayers();
+
+  // My action panel
+  renderActionPanel();
+}
+
+function renderDealerHand() {
+  const gs      = gameState;
+  const dHand   = document.getElementById('dealer-hand');
+  const dScore  = document.getElementById('dealer-score');
+  dHand.innerHTML = '';
+
+  const cards = gs.dealer.cards || [];
+  const hidden = gs.dealer.hiddenCard;
+
+  cards.forEach((c, idx) => {
+    // First card hidden during playing phase
+    if (idx === 0 && gs.phase === 'playing') {
+      dHand.appendChild(renderCard(c, true));
+    } else {
+      dHand.appendChild(renderCard(c));
+    }
+  });
+
+  if (gs.phase !== 'betting') {
+    const visibleCards = gs.phase === 'playing' ? cards.slice(1) : cards;
+    const total = handTotal(visibleCards);
+    dScore.className = 'score-badge';
+    dScore.classList.remove('hidden');
+    dScore.textContent = gs.phase === 'playing' ? '?' : total;
+    if (total > 21) dScore.classList.add('bust');
+  } else {
+    dScore.classList.add('hidden');
+  }
+}
+
+function renderPlayers() {
+  const gs  = gameState;
+  const row = document.getElementById('players-row');
+  row.innerHTML = '';
+
+  gs.turnOrder.forEach(pid => {
+    const p = gs.players[pid];
+    if (!p) return;
+
+    const area = document.createElement('div');
+    const isMe = pid === myId;
+    const status = p.status;
+
+    let areaClass = 'player-area';
+    if (gs.currentTurn === pid && gs.phase === 'playing') areaClass += ' active-turn';
+    if (status === 'busted') areaClass += ' busted';
+    if (status === 'stood')  areaClass += ' stood';
+    if (status === 'winner') areaClass += ' winner';
+
+    let dotClass = 'dot';
+    if (gs.currentTurn === pid) dotClass += ' active';
+    else if (status === 'busted') dotClass += ' busted';
+    else if (status === 'stood')  dotClass += ' stood';
+
+    const total = handTotal(p.cards || []);
+    const scoreCls = total > 21 ? 'bust' : (total === 21 && (p.cards||[]).length === 2 ? 'blackjack' : '');
+
+    area.className = areaClass;
+    area.innerHTML = `
+      <div class="player-name-tag">
+        <span class="${dotClass}"></span>
+        <span>${escHtml(p.name)}${isMe ? ' (moi)' : ''}</span>
+      </div>
+      <div class="chips-display">💰 ${p.balance}</div>
+      <div class="hand" id="hand-${pid}"></div>
+      ${p.cards && p.cards.length ? `<div class="score-badge ${scoreCls}">${total > 21 ? '💥 '+total : total}</div>` : ''}
+      ${p.bet ? `<div style="font-size:0.7rem;color:var(--gold-dim);margin-top:4px;">Mise: ${p.bet}</div>` : ''}
+      ${status === 'betConfirmed' || p.betConfirmed ? '<div style="font-size:0.65rem;color:#2ecc71;margin-top:2px;">✔ Mise confirmée</div>' : ''}
+    `;
+    row.appendChild(area);
+
+    // Render cards into hand div
+    const handEl = area.querySelector('#hand-' + pid);
+    (p.cards || []).forEach(c => handEl.appendChild(renderCard(c)));
+  });
+}
+
+function renderActionPanel() {
+  const gs = gameState;
+  if (!gs) return;
+
+  const betPhase  = document.getElementById('bet-phase');
+  const playPhase = document.getElementById('play-phase');
+  const waitPhase = document.getElementById('wait-phase');
+
+  betPhase.classList.add('hidden');
+  playPhase.classList.add('hidden');
+  waitPhase.classList.add('hidden');
+
+  const me = gs.players[myId];
+  if (!me) return;
+
+  document.getElementById('balance-display').textContent = 'Balance : ' + (myBalance || me.balance);
+
+  if (gs.phase === 'betting') {
+    if (!me.betConfirmed) {
+      betPhase.classList.remove('hidden');
+      document.getElementById('current-bet-display').textContent = currentBet + ' 💰';
+    } else {
+      waitPhase.classList.remove('hidden');
+    }
+  } else if (gs.phase === 'playing') {
+    if (gs.currentTurn === myId && me.status === 'playing') {
+      playPhase.classList.remove('hidden');
+      // Disable double if not enough balance or > 2 cards
+      document.getElementById('btn-double').disabled = (me.cards.length > 2 || me.balance < me.bet);
+      startTurnTimer();
+    } else {
+      waitPhase.classList.remove('hidden');
+      stopTurnTimer();
+      const who = gs.players[gs.currentTurn];
+      document.getElementById('turn-timer-label').textContent = 'Tour de : ' + (who ? who.name : '—');
+    }
+  } else if (gs.phase === 'dealer' || gs.phase === 'results') {
+    waitPhase.classList.remove('hidden');
+  }
+}
+
+/* ══════════════════════════════════════════
+   BETTING
+══════════════════════════════════════════ */
+function addBet(amount) {
+  const me = gameState && gameState.players[myId];
+  const bal = myBalance || (me && me.balance) || 1000;
+  if (currentBet + amount > bal) { setStatus('Mise trop élevée.', 'error'); return; }
+  currentBet += amount;
+  document.getElementById('current-bet-display').textContent = currentBet + ' 💰';
+}
+
+function clearBet() {
+  currentBet = 0;
+  document.getElementById('current-bet-display').textContent = '0 💰';
+}
+
+async function confirmBet() {
+  if (currentBet <= 0) { setStatus('Place une mise avant de confirmer.', 'error'); return; }
+  const me = gameState.players[myId];
+  if (currentBet > me.balance) { setStatus('Pas assez de jetons.', 'error'); return; }
+
+  await roomRef.child('gameState/players/' + myId).update({
+    bet: currentBet,
+    betConfirmed: true
+  });
+
+  addLog(myName + ' a misé ' + currentBet + ' jetons.');
+  setStatus('Mise confirmée ! En attente des autres…', 'success');
+
+  // Host checks if everyone confirmed
+  if (isHost) checkAllBetsConfirmed();
+}
+
+async function checkAllBetsConfirmed() {
+  const snap = await roomRef.child('gameState').get();
+  const gs   = snap.val();
+  const all  = Object.values(gs.players).every(p => p.betConfirmed);
+  if (!all) return;
+
+  // Deal cards
+  const deck = [...gs.deck];
+  const updates = {};
+  const order = gs.turnOrder;
+
+  // Deal 2 cards per player + 2 to dealer
+  order.forEach(pid => {
+    const c1 = deck.pop(), c2 = deck.pop();
+    updates['players/' + pid + '/cards'] = [c1, c2];
+    updates['players/' + pid + '/status'] = 'playing';
+  });
+
+  const dc1 = deck.pop(), dc2 = deck.pop();
+  updates['dealer/cards'] = [dc1, dc2];
+  updates['deck'] = deck;
+  updates['phase'] = 'playing';
+  updates['currentTurn'] = order[0];
+
+  await roomRef.child('gameState').update(updates);
+  addLog('Les cartes sont distribuées !', true);
+}
+
+/* ══════════════════════════════════════════
+   TURN TIMER
+══════════════════════════════════════════ */
+let timerLeft = TURN_SECONDS;
+function startTurnTimer() {
+  stopTurnTimer();
+  timerLeft = TURN_SECONDS;
+  updateTimerBar();
+  timerInterval = setInterval(() => {
+    timerLeft--;
+    updateTimerBar();
+    if (timerLeft <= 0) {
+      stopTurnTimer();
+      sendAction('stand'); // auto stand
+    }
+  }, 1000);
+}
+function stopTurnTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+}
+function updateTimerBar() {
+  const pct = (timerLeft / TURN_SECONDS) * 100;
+  const bar = document.getElementById('timer-bar');
+  if (!bar) return;
+  bar.style.width = pct + '%';
+  bar.className   = 'timer-bar' + (pct < 30 ? ' urgent' : '');
+  document.getElementById('turn-timer-label').textContent = `Votre tour — ${timerLeft}s`;
+}
+
+/* ══════════════════════════════════════════
+   PLAYER ACTIONS
+══════════════════════════════════════════ */
+async function sendAction(action) {
+  stopTurnTimer();
+  const snap = await roomRef.child('gameState').get();
+  const gs   = snap.val();
+
+  if (gs.currentTurn !== myId) return;
+
+  const deck   = [...gs.deck];
+  const me     = gs.players[myId];
+  const cards  = [...me.cards];
+  let status   = me.status;
+  let balance  = me.balance;
+  let bet      = me.bet;
+  const updates = {};
+
+  if (action === 'hit') {
+    const newCard = deck.pop();
+    cards.push(newCard);
+    const total = handTotal(cards);
+    addLog(myName + ' tire : ' + newCard.value + newCard.suit);
+    if (total > 21) {
+      status = 'busted';
+      balance -= bet;
+      addLog(myName + ' est BUST (' + total + ') !', true);
+    } else if (total === 21) {
+      status = 'stood';
+      addLog(myName + ' a 21 !', true);
+    }
+    updates['gameState/players/' + myId + '/cards']   = cards;
+    updates['gameState/players/' + myId + '/status']  = status;
+    updates['gameState/players/' + myId + '/balance'] = balance;
+    updates['gameState/deck'] = deck;
+    myBalance = balance;
+  }
+
+  if (action === 'stand') {
+    status = 'stood';
+    addLog(myName + ' reste (' + handTotal(cards) + ').');
+    updates['gameState/players/' + myId + '/status'] = status;
+  }
+
+  if (action === 'double') {
+    if (cards.length === 2 && balance >= bet) {
+      const newCard = deck.pop();
+      cards.push(newCard);
+      bet *= 2;
+      const total = handTotal(cards);
+      addLog(myName + ' double et tire : ' + newCard.value + newCard.suit);
+      if (total > 21) {
+        status = 'busted';
+        balance -= bet;
+        addLog(myName + ' est BUST (' + total + ') !', true);
+      } else {
+        status = 'stood';
+      }
+      updates['gameState/players/' + myId + '/cards']   = cards;
+      updates['gameState/players/' + myId + '/bet']     = bet;
+      updates['gameState/players/' + myId + '/status']  = status;
+      updates['gameState/players/' + myId + '/balance'] = balance;
+      updates['gameState/deck'] = deck;
+      myBalance = balance;
+    }
+    return;
+  }
+
+  await roomRef.update(updates);
+
+  // Advance turn
+  if (isHost) advanceTurn(gs);
+}
+
+async function advanceTurn(prevGs) {
+  const snap = await roomRef.child('gameState').get();
+  const gs   = snap.val();
+  const order = gs.turnOrder;
+
+  // Find next player who is still 'playing'
+  const currentIdx = order.indexOf(gs.currentTurn);
+  let nextIdx = currentIdx + 1;
+  while (nextIdx < order.length) {
+    const pid = order[nextIdx];
+    const st  = gs.players[pid].status;
+    if (st === 'playing') break;
+    nextIdx++;
+  }
+
+  if (nextIdx >= order.length) {
+    // All players done → dealer plays
+    await dealerPlay(gs);
+  } else {
+    await roomRef.child('gameState/currentTurn').set(order[nextIdx]);
+  }
+}
+
+/* ══════════════════════════════════════════
+   DEALER PLAYS (host)
+══════════════════════════════════════════ */
+async function dealerPlay(gs) {
+  await roomRef.child('gameState/phase').set('dealer');
+  addLog('Le croupier joue…', true);
+
+  let deck  = [...gs.deck];
+  let cards = [...gs.dealer.cards];
+
+  while (handTotal(cards) < 17) {
+    const c = deck.pop();
+    cards.push(c);
+    addLog('Croupier tire : ' + c.value + c.suit);
+  }
+
+  await roomRef.child('gameState').update({ deck, 'dealer/cards': cards });
+
+  // Resolve results
+  await resolveRound(cards);
+}
+
+/* ══════════════════════════════════════════
+   RESOLVE ROUND (host)
+══════════════════════════════════════════ */
+async function resolveRound(dealerCards) {
+  const snap = await roomRef.child('gameState').get();
+  const gs   = snap.val();
+  const dTotal = handTotal(dealerCards);
+  const dBJ    = dealerCards.length === 2 && dTotal === 21;
+  const updates = {};
+
+  Object.entries(gs.players).forEach(([pid, p]) => {
+    const pTotal = handTotal(p.cards || []);
+    const pBJ    = (p.cards || []).length === 2 && pTotal === 21;
+    let balance  = p.balance;
+    let result   = '';
+
+    if (p.status === 'busted') {
+      result = 'bust'; // already deducted
+    } else if (dBJ && !pBJ) {
+      balance -= p.bet;
+      result   = 'lose';
+    } else if (pBJ && !dBJ) {
+      balance += Math.floor(p.bet * 1.5);
+      result   = 'blackjack';
+    } else if (pTotal > 21) {
+      // bust already handled
+      result = 'bust';
+    } else if (dTotal > 21 || pTotal > dTotal) {
+      balance += p.bet;
+      result   = 'win';
+    } else if (pTotal === dTotal) {
+      result = 'push'; // no change
+    } else {
+      balance -= p.bet;
+      result   = 'lose';
+    }
+
+    updates['players/' + pid + '/balance'] = balance;
+    updates['players/' + pid + '/result']  = result;
+    updates['players/' + pid + '/status']  = result === 'win' || result === 'blackjack' ? 'winner' : p.status;
+  });
+
+  updates['phase'] = 'results';
+  await roomRef.child('gameState').update(updates);
+}
+
+/* ══════════════════════════════════════════
+   NEXT ROUND
+══════════════════════════════════════════ */
+async function nextRound() {
+  document.getElementById('result-overlay').classList.remove('show');
+  if (!isHost) return;
+
+  const snap = await roomRef.child('gameState').get();
+  const gs   = snap.val();
+  const deck = shuffle(buildDeck().concat(buildDeck()));
+  const updates = { deck, phase: 'betting', currentTurn: null, 'dealer/cards': [] };
+
+  gs.turnOrder.forEach(pid => {
+    const p = gs.players[pid];
+    updates['players/' + pid + '/cards']        = [];
+    updates['players/' + pid + '/bet']          = 0;
+    updates['players/' + pid + '/betConfirmed'] = false;
+    updates['players/' + pid + '/status']       = 'betting';
+    updates['players/' + pid + '/result']       = null;
+    // Remove bankrupt players
+    if (p.balance <= 0) {
+      // keep but with 100 bonus
+      updates['players/' + pid + '/balance'] = 100;
+      addLog(p.name + ' est renfloué avec 100 jetons.', true);
+    }
+  });
+  updates['round'] = (gs.round || 1) + 1;
+
+  currentBet = 0;
+  await roomRef.child('gameState').update(updates);
+  document.getElementById('message-log').innerHTML = '';
+}
+
+/* ══════════════════════════════════════════
+   FIREBASE LISTENER → render
+══════════════════════════════════════════ */
+// Override watchLobby to also handle game state changes
+const _origWatchLobby = watchLobby;
+function watchLobby() {
+  roomRef.on('value', snap => {
+    const data = snap.val();
+    if (!data) { leaveGame(); return; }
+
+    if (data.status === 'playing' && data.gameState) {
+      const prevPhase = gameState && gameState.phase;
+      gameState = data.gameState;
+
+      showScreen('game-screen');
+      renderGame();
+
+      // Check if host should advance turn
+      if (isHost && gameState.phase === 'playing') {
+        const me = gameState.players[myId];
+        if (me && me.status !== 'playing' && gameState.currentTurn === myId) {
+          advanceTurn(gameState);
+        }
+      }
+
+      // Check all bets
+      if (isHost && gameState.phase === 'betting') {
+        const all = Object.values(gameState.players).every(p => p.betConfirmed);
+        if (all) checkAllBetsConfirmed();
+      }
+
+      // Show result overlay when phase changes to results
+      if (gameState.phase === 'results' && prevPhase !== 'results') {
+        showResults();
+      }
+
+      // Update my local balance
+      if (gameState.players[myId]) {
+        myBalance = gameState.players[myId].balance;
+      }
+    } else if (data.status === 'waiting') {
+      showScreen('waiting-room');
+      renderWaitingRoom(data);
+    }
+  });
+}
+
+/* ══════════════════════════════════════════
+   SHOW RESULTS
+══════════════════════════════════════════ */
+function showResults() {
+  const gs  = gameState;
+  const me  = gs.players[myId];
+  const res = me && me.result;
+
+  const overlay = document.getElementById('result-overlay');
+  const emoji   = document.getElementById('result-emoji');
+  const title   = document.getElementById('result-title');
+  const sub     = document.getElementById('result-sub');
+  const detail  = document.getElementById('round-results');
+
+  const map = {
+    win:       { e:'🏆', t:'Victoire !',   c:'win',  s:'+'+me.bet+' jetons' },
+    blackjack: { e:'🂡',  t:'Blackjack !',  c:'win',  s:'+'+Math.floor(me.bet*1.5)+' jetons (3:2)' },
+    lose:      { e:'💔', t:'Perdu…',        c:'lose', s:'-'+me.bet+' jetons' },
+    bust:      { e:'💥', t:'Bust !',        c:'lose', s:'-'+me.bet+' jetons' },
+    push:      { e:'🤝', t:'Égalité',       c:'push', s:'Mise remboursée' }
+  };
+  const r = map[res] || { e:'🃏', t:'Fin de manche', c:'push', s:'' };
+
+  emoji.textContent  = r.e;
+  title.textContent  = r.t;
+  title.className    = 'result-title ' + r.c;
+  sub.textContent    = r.s;
+
+  // All players summary
+  let html = '<table style="width:100%;border-collapse:collapse;margin-top:8px">';
+  gs.turnOrder.forEach(pid => {
+    const p = gs.players[pid];
+    const resMap2 = { win:'✔ Gagné', blackjack:'⭐ Blackjack', lose:'✗ Perdu', bust:'💥 Bust', push:'🤝 Égalité' };
+    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.06)">
+      <td style="padding:4px 8px;text-align:left">${escHtml(p.name)}</td>
+      <td style="padding:4px 8px">${handTotal(p.cards||[])} pts</td>
+      <td style="padding:4px 8px">${resMap2[p.result]||''}</td>
+      <td style="padding:4px 8px;color:var(--gold)">💰 ${p.balance}</td>
+    </tr>`;
+  });
+  html += '</table>';
+  detail.innerHTML = html;
+
+  overlay.classList.add('show');
+}
+
+/* ══════════════════════════════════════════
+   LEAVE
+══════════════════════════════════════════ */
+async function leaveGame() {
+  stopTurnTimer();
+  if (roomRef) {
+    await roomRef.child('players/' + myId).remove();
+    roomRef.off();
+    roomRef = null;
+  }
+  gameState  = null;
+  currentBet = 0;
+  myBalance  = 1000;
+  document.getElementById('result-overlay').classList.remove('show');
+  document.getElementById('message-log').innerHTML = '';
+  showScreen('lobby');
+  refreshGames();
+  setStatus('Déconnecté de la table.', '');
+}
+</script>
+</body>
+</html>
