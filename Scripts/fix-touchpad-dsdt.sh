@@ -66,24 +66,29 @@ detect_distro() {
     log "Distribution détectée : $DISTRO_ID (famille : $FAMILY)"
 }
 
-check_grub_present() {
-    if [[ ! -d /etc/grub.d ]]; then
-        die "GRUB ne semble pas installé sur ce système (/etc/grub.d absent). Ce script ne gère que GRUB (pas systemd-boot)."
+detect_bootloader() {
+    if [[ -d /etc/grub.d ]] && command -v grub-mkconfig >/dev/null 2>&1 || command -v grub2-mkconfig >/dev/null 2>&1; then
+        BOOTLOADER="grub"
+    elif [[ -f /boot/loader/loader.conf ]] || command -v bootctl >/dev/null 2>&1; then
+        BOOTLOADER="systemd-boot"
+    else
+        die "Bootloader non détecté (ni GRUB ni systemd-boot). Ce script ne gère que ces deux-là."
     fi
+    log "Bootloader détecté : $BOOTLOADER"
 }
 
 install_dependencies() {
     log "Installation des dépendances (acpica, wget, patch, grub)..."
     case "$FAMILY" in
         arch)
-            pacman -Sy --needed --noconfirm acpica wget patch grub
+            pacman -Sy --needed --noconfirm acpica wget patch cpio grub
             ;;
         debian)
             apt-get update
-            apt-get install -y acpica-tools wget patch grub2-common
+            apt-get install -y acpica-tools wget patch cpio grub2-common
             ;;
         fedora)
-            dnf install -y acpica-tools wget patch grub2-tools
+            dnf install -y acpica-tools wget patch cpio grub2-tools
             ;;
     esac
 }
@@ -137,6 +142,87 @@ install_dsdt() {
     cp dsdt.aml "$DSDT_TARGET"
 }
 
+### ---- Méthode systemd-boot (et fallback universel) : override via initrd ----
+# Le noyau Linux peut charger une DSDT de remplacement si elle se trouve
+# dans l'initramfs, au chemin kernel/firmware/acpi/dsdt.aml. On construit
+# donc une petite archive cpio contenant ce fichier, et on la préfixe à
+# chaque image d'initramfs présente dans /boot (comme pour le microcode).
+
+apply_initrd_override() {
+    log "Intégration de dsdt.aml dans l'initramfs (méthode systemd-boot)..."
+
+    local override_dir="$WORKDIR/acpi_override"
+    rm -rf "$override_dir"
+    mkdir -p "$override_dir/kernel/firmware/acpi"
+    cp dsdt.aml "$override_dir/kernel/firmware/acpi/dsdt.aml"
+
+    ( cd "$override_dir" && find kernel -print0 | cpio -0 -H newc --create ) > "$WORKDIR/acpi_override.cpio" \
+        || die "Échec de la création de l'archive cpio."
+
+    shopt -s nullglob
+    local images=(/boot/initramfs-*.img)
+    shopt -u nullglob
+    [[ ${#images[@]} -gt 0 ]] || die "Aucun fichier initramfs trouvé dans /boot (chemin attendu : /boot/initramfs-*.img)."
+
+    for img in "${images[@]}"; do
+        local orig="${img}.orig"
+        # On garde toujours une copie de l'initramfs "propre" (sans override)
+        # pour pouvoir régénérer proprement, y compris après un rerun du script.
+        if [[ ! -f "$orig" ]]; then
+            cp "$img" "$orig"
+        fi
+        cat "$WORKDIR/acpi_override.cpio" "$orig" > "$img"
+        log "Table ACPI intégrée dans : $img"
+    done
+
+    setup_pacman_hook_if_arch
+}
+
+# Sur Arch, chaque mise à jour du noyau régénère l'initramfs et écraserait
+# notre modification. On installe un hook pacman qui réapplique
+# automatiquement l'override après chaque régénération de mkinitcpio.
+setup_pacman_hook_if_arch() {
+    [[ "$FAMILY" == "arch" ]] || return 0
+
+    local reapply_script="/usr/local/bin/reapply-acpi-override.sh"
+    local hook_file="/etc/pacman.d/hooks/95-acpi-override.hook"
+
+    cat > "$reapply_script" <<EOF
+#!/usr/bin/env bash
+# Généré par fix-touchpad-dsdt.sh : réapplique l'override ACPI dans
+# l'initramfs après chaque régénération par mkinitcpio.
+set -e
+CPIO="$WORKDIR/acpi_override.cpio"
+[[ -f "\$CPIO" ]] || exit 0
+shopt -s nullglob
+for img in /boot/initramfs-*.img; do
+    orig="\${img}.orig"
+    if [[ ! -f "\$orig" ]]; then
+        cp "\$img" "\$orig"
+    fi
+    cat "\$CPIO" "\$orig" > "\$img"
+done
+EOF
+    chmod +x "$reapply_script"
+
+    mkdir -p /etc/pacman.d/hooks
+    cat > "$hook_file" <<EOF
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux
+Target = linux-lts
+Target = mkinitcpio
+
+[Action]
+Description = Réapplication de l'override ACPI DSDT dans l'initramfs
+When = PostTransaction
+Exec = $reapply_script
+EOF
+    log "Hook pacman installé : les mises à jour du noyau réappliqueront automatiquement l'override."
+}
+
 update_grub_custom() {
     log "Mise à jour de $GRUB_CUSTOM..."
     if [[ -f "$GRUB_CUSTOM" ]] && grep -qF "$GRUB_LINE" "$GRUB_CUSTOM"; then
@@ -174,7 +260,7 @@ regen_grub_config() {
 main() {
     require_root
     detect_distro
-    check_grub_present
+    detect_bootloader
     install_dependencies
     prepare_workdir
     dump_acpi_tables
@@ -182,12 +268,23 @@ main() {
     download_patch
     apply_patch
     reassemble_dsdt
-    install_dsdt
-    update_grub_custom
-    regen_grub_config
+
+    case "$BOOTLOADER" in
+        grub)
+            install_dsdt
+            update_grub_custom
+            regen_grub_config
+            ;;
+        systemd-boot)
+            apply_initrd_override
+            ;;
+    esac
 
     log "Terminé ! Redémarrez la machine pour que le touchpad soit pris en compte."
     log "Fichiers de travail conservés dans : $WORKDIR (dont dsdt.dsl.orig.bak, sauvegarde avant patch)"
+    if [[ "$BOOTLOADER" == "systemd-boot" ]]; then
+        log "Note : les images d'initramfs originales sont sauvegardées en *.orig dans /boot."
+    fi
 }
 
 main "$@"
