@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
 #
-# fix-touchpad-dsdt.sh
+# fix-touchpad-dsdt.sh (v2)
 #
 # Automatise le patch ACPI DSDT pour corriger le touchpad sur certains
-# laptops Lenovo AMD, sur Arch, Ubuntu/Debian et Fedora.
+# laptops Lenovo AMD, sur Arch, Ubuntu/Debian et Fedora, avec GRUB ou
+# systemd-boot (classique ou UKI).
 #
-# Basé sur un guide manuel, avec correction de deux coquilles :
-#   - "patch dsdt.dsl < dstd.patch"  ->  "< dsdt.patch"
-#   - "sudo udpate-grub"             ->  bonne commande selon la distro
+# Méthode : le noyau Linux peut charger une DSDT de remplacement si elle se
+# trouve dans un segment cpio NON COMPRESSÉ placé en tête de l'initrd, au
+# chemin kernel/firmware/acpi/dsdt.aml (même mécanisme que le microcode
+# CPU). Avec GRUB, il existe une méthode plus simple et native (directive
+# "acpi" du menu GRUB), qui ne passe pas par l'initrd.
 #
 # Usage :
 #   chmod +x fix-touchpad-dsdt.sh
 #   sudo ./fix-touchpad-dsdt.sh
 #
-# ATTENTION : ce patch est spécifique à un modèle de DSDT donné
-# (Lenovo/AMD). S'il ne s'applique pas proprement sur votre machine,
-# le script s'arrête sans rien modifier sur le système.
+# ATTENTION : ce patch est spécifique à un modèle de DSDT donné (Lenovo/AMD).
+# S'il ne s'applique pas proprement, le script s'arrête sans rien modifier.
 
 set -euo pipefail
 
-# ---------- Réglages ----------
 WORKDIR="${SUDO_USER:+/home/$SUDO_USER}/acpi"
 WORKDIR="${WORKDIR:-$HOME/acpi}"
 PATCH_URL="https://launchpadlibrarian.net/738328314/dsdt.patch"
@@ -27,50 +28,41 @@ DSDT_TARGET="/boot/dsdt.aml"
 GRUB_CUSTOM="/etc/grub.d/40_custom"
 GRUB_LINE="acpi ${DSDT_TARGET}"
 
-# ---------- Fonctions utilitaires ----------
 log()  { echo -e "\n\033[1;34m==>\033[0m $*"; }
+warn() { echo -e "\033[1;33mAttention:\033[0m $*"; }
 err()  { echo -e "\033[1;31mErreur:\033[0m $*" >&2; }
 die()  { err "$*"; exit 1; }
 
 require_root() {
-    if [[ $EUID -ne 0 ]]; then
-        die "Ce script doit être lancé avec sudo (il modifie /boot et /etc/grub.d)."
-    fi
+    [[ $EUID -eq 0 ]] || die "Ce script doit être lancé avec sudo (il modifie /boot, /etc/grub.d ou les entrées systemd-boot)."
 }
 
 detect_distro() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        DISTRO_ID="${ID:-unknown}"
-        DISTRO_ID_LIKE="${ID_LIKE:-}"
-    else
-        die "Impossible de détecter la distribution (/etc/os-release introuvable)."
-    fi
-
-    case "$DISTRO_ID" in
-        arch|manjaro|endeavouros)
-            FAMILY="arch" ;;
-        ubuntu|debian|linuxmint|pop)
-            FAMILY="debian" ;;
-        fedora)
-            FAMILY="fedora" ;;
+    [[ -f /etc/os-release ]] || die "Impossible de détecter la distribution (/etc/os-release introuvable)."
+    . /etc/os-release
+    local id="${ID:-unknown}" id_like="${ID_LIKE:-}"
+    case "$id" in
+        arch|manjaro|endeavouros)          FAMILY="arch" ;;
+        ubuntu|debian|linuxmint|pop)       FAMILY="debian" ;;
+        fedora)                            FAMILY="fedora" ;;
         *)
-            case "$DISTRO_ID_LIKE" in
-                *arch*)           FAMILY="arch" ;;
-                *debian*)         FAMILY="debian" ;;
-                *fedora*|*rhel*)  FAMILY="fedora" ;;
-                *) die "Distribution '$DISTRO_ID' non supportée (arch / debian-ubuntu / fedora uniquement)." ;;
-            esac
-            ;;
+            case "$id_like" in
+                *arch*)          FAMILY="arch" ;;
+                *debian*)        FAMILY="debian" ;;
+                *fedora*|*rhel*) FAMILY="fedora" ;;
+                *) die "Distribution '$id' non supportée (arch / debian-ubuntu / fedora uniquement)." ;;
+            esac ;;
     esac
-    log "Distribution détectée : $DISTRO_ID (famille : $FAMILY)"
+    log "Distribution détectée : $id (famille : $FAMILY)"
 }
 
 detect_bootloader() {
-    if [[ -d /etc/grub.d ]] && command -v grub-mkconfig >/dev/null 2>&1 || command -v grub2-mkconfig >/dev/null 2>&1; then
-        BOOTLOADER="grub"
-    elif [[ -f /boot/loader/loader.conf ]] || command -v bootctl >/dev/null 2>&1; then
+    if [[ -f /boot/loader/loader.conf ]] || [[ -f /boot/efi/loader/loader.conf ]] || [[ -f /efi/loader/loader.conf ]]; then
         BOOTLOADER="systemd-boot"
+    elif [[ -f /etc/default/grub ]] || [[ -f /boot/grub/grub.cfg ]] || [[ -f /boot/grub2/grub.cfg ]]; then
+        BOOTLOADER="grub"
+    elif command -v grub-mkconfig >/dev/null 2>&1 || command -v grub2-mkconfig >/dev/null 2>&1; then
+        BOOTLOADER="grub"
     else
         die "Bootloader non détecté (ni GRUB ni systemd-boot). Ce script ne gère que ces deux-là."
     fi
@@ -78,17 +70,26 @@ detect_bootloader() {
 }
 
 install_dependencies() {
-    log "Installation des dépendances (acpica, wget, patch, grub)..."
+    log "Installation des dépendances (acpica, wget, patch, cpio)..."
     case "$FAMILY" in
         arch)
-            pacman -Sy --needed --noconfirm acpica wget patch cpio grub
+            pacman -Sy --needed --noconfirm acpica wget patch cpio
+            if [[ "$BOOTLOADER" == "grub" ]]; then
+                pacman -S --needed --noconfirm grub
+            fi
             ;;
         debian)
             apt-get update
-            apt-get install -y acpica-tools wget patch cpio grub2-common
+            apt-get install -y acpica-tools wget patch cpio
+            if [[ "$BOOTLOADER" == "grub" ]]; then
+                apt-get install -y grub2-common
+            fi
             ;;
         fedora)
-            dnf install -y acpica-tools wget patch cpio grub2-tools
+            dnf install -y acpica-tools wget patch cpio
+            if [[ "$BOOTLOADER" == "grub" ]]; then
+                dnf install -y grub2-tools
+            fi
             ;;
     esac
 }
@@ -127,7 +128,7 @@ apply_patch() {
     if ! patch dsdt.dsl < dsdt.patch; then
         err "Le patch ne s'est pas appliqué proprement."
         err "Cela peut arriver si votre DSDT diffère de celle visée par ce patch (autre modèle/BIOS)."
-        die "Abandon : aucune modification n'a été faite sur /boot ou /etc/grub.d."
+        die "Abandon : aucune modification n'a été faite sur /boot, GRUB ou systemd-boot."
     fi
 }
 
@@ -142,89 +143,11 @@ install_dsdt() {
     cp dsdt.aml "$DSDT_TARGET"
 }
 
-### ---- Méthode systemd-boot (et fallback universel) : override via initrd ----
-# Le noyau Linux peut charger une DSDT de remplacement si elle se trouve
-# dans l'initramfs, au chemin kernel/firmware/acpi/dsdt.aml. On construit
-# donc une petite archive cpio contenant ce fichier, et on la préfixe à
-# chaque image d'initramfs présente dans /boot (comme pour le microcode).
-
-apply_initrd_override() {
-    log "Intégration de dsdt.aml dans l'initramfs (méthode systemd-boot)..."
-
-    local override_dir="$WORKDIR/acpi_override"
-    rm -rf "$override_dir"
-    mkdir -p "$override_dir/kernel/firmware/acpi"
-    cp dsdt.aml "$override_dir/kernel/firmware/acpi/dsdt.aml"
-
-    ( cd "$override_dir" && find kernel -print0 | cpio -0 -H newc --create ) > "$WORKDIR/acpi_override.cpio" \
-        || die "Échec de la création de l'archive cpio."
-
-    shopt -s nullglob
-    local images=(/boot/initramfs-*.img)
-    shopt -u nullglob
-    [[ ${#images[@]} -gt 0 ]] || die "Aucun fichier initramfs trouvé dans /boot (chemin attendu : /boot/initramfs-*.img)."
-
-    for img in "${images[@]}"; do
-        local orig="${img}.orig"
-        # On garde toujours une copie de l'initramfs "propre" (sans override)
-        # pour pouvoir régénérer proprement, y compris après un rerun du script.
-        if [[ ! -f "$orig" ]]; then
-            cp "$img" "$orig"
-        fi
-        cat "$WORKDIR/acpi_override.cpio" "$orig" > "$img"
-        log "Table ACPI intégrée dans : $img"
-    done
-
-    setup_pacman_hook_if_arch
-}
-
-# Sur Arch, chaque mise à jour du noyau régénère l'initramfs et écraserait
-# notre modification. On installe un hook pacman qui réapplique
-# automatiquement l'override après chaque régénération de mkinitcpio.
-setup_pacman_hook_if_arch() {
-    [[ "$FAMILY" == "arch" ]] || return 0
-
-    local reapply_script="/usr/local/bin/reapply-acpi-override.sh"
-    local hook_file="/etc/pacman.d/hooks/95-acpi-override.hook"
-
-    cat > "$reapply_script" <<EOF
-#!/usr/bin/env bash
-# Généré par fix-touchpad-dsdt.sh : réapplique l'override ACPI dans
-# l'initramfs après chaque régénération par mkinitcpio.
-set -e
-CPIO="$WORKDIR/acpi_override.cpio"
-[[ -f "\$CPIO" ]] || exit 0
-shopt -s nullglob
-for img in /boot/initramfs-*.img; do
-    orig="\${img}.orig"
-    if [[ ! -f "\$orig" ]]; then
-        cp "\$img" "\$orig"
-    fi
-    cat "\$CPIO" "\$orig" > "\$img"
-done
-EOF
-    chmod +x "$reapply_script"
-
-    mkdir -p /etc/pacman.d/hooks
-    cat > "$hook_file" <<EOF
-[Trigger]
-Operation = Install
-Operation = Upgrade
-Type = Package
-Target = linux
-Target = linux-lts
-Target = mkinitcpio
-
-[Action]
-Description = Réapplication de l'override ACPI DSDT dans l'initramfs
-When = PostTransaction
-Exec = $reapply_script
-EOF
-    log "Hook pacman installé : les mises à jour du noyau réappliqueront automatiquement l'override."
-}
+### ---- Méthode GRUB : directive native "acpi", pas d'initrd impliqué ----
 
 update_grub_custom() {
     log "Mise à jour de $GRUB_CUSTOM..."
+    mkdir -p "$(dirname "$GRUB_CUSTOM")"
     if [[ -f "$GRUB_CUSTOM" ]] && grep -qF "$GRUB_LINE" "$GRUB_CUSTOM"; then
         log "La ligne est déjà présente, rien à faire."
     else
@@ -257,6 +180,171 @@ regen_grub_config() {
     esac
 }
 
+### ---- Méthode systemd-boot : early cpio + entrées de boot ----
+# Le noyau charge une table ACPI de remplacement si elle est présente dans
+# un segment cpio NON COMPRESSÉ, placé avant l'initrd principal. On construit
+# donc un mini-cpio contenant kernel/firmware/acpi/dsdt.aml, et on l'ajoute
+# comme ligne "initrd" supplémentaire (avant l'initrd principal) dans les
+# entrées de boot systemd-boot. C'est la méthode documentée par le noyau,
+# identique à celle utilisée pour le microcode CPU.
+
+find_esp_dir() {
+    if command -v bootctl >/dev/null 2>&1; then
+        local esp
+        esp="$(bootctl --print-esp-path 2>/dev/null || true)"
+        if [[ -n "$esp" ]]; then
+            ESP_DIR="$esp"
+            return
+        fi
+    fi
+    for candidate in /boot /boot/efi /efi; do
+        if [[ -d "$candidate/loader" ]] || [[ -d "$candidate/EFI" ]]; then
+            ESP_DIR="$candidate"
+            return
+        fi
+    done
+    die "Impossible de localiser la partition ESP (ni bootctl, ni /boot/loader, ni /boot/efi)."
+}
+
+build_acpi_override_cpio() {
+    log "Construction du segment cpio non compressé pour l'override ACPI..."
+    local override_dir="$WORKDIR/acpi_override"
+    rm -rf "$override_dir"
+    mkdir -p "$override_dir/kernel/firmware/acpi"
+    cp dsdt.aml "$override_dir/kernel/firmware/acpi/dsdt.aml"
+    ( cd "$override_dir" && find kernel -print0 | cpio -0 -H newc --create ) > "$ESP_DIR/acpi_override.img" \
+        || die "Échec de la création de l'archive cpio."
+    log "Créé : $ESP_DIR/acpi_override.img"
+}
+
+# Insère "initrd /acpi_override.img" juste avant la première ligne "initrd"
+# existante d'un fichier d'entrée systemd-boot (idempotent).
+patch_entry_file() {
+    local entry="$1"
+    grep -q '^initrd[[:space:]]\+/acpi_override\.img$' "$entry" && return 0
+    grep -q '^linux[[:space:]]' "$entry" || return 0   # pas une vraie entrée boot
+    local tmp
+    tmp="$(mktemp)"
+    local inserted=0
+    while IFS= read -r line; do
+        if [[ $inserted -eq 0 && "$line" =~ ^initrd[[:space:]] ]]; then
+            echo "initrd  /acpi_override.img" >> "$tmp"
+            inserted=1
+        fi
+        echo "$line" >> "$tmp"
+    done < "$entry"
+    # Si le fichier n'avait aucune ligne initrd, on l'ajoute après "linux"
+    if [[ $inserted -eq 0 ]]; then
+        rm -f "$tmp"; tmp="$(mktemp)"
+        while IFS= read -r line; do
+            echo "$line" >> "$tmp"
+            if [[ "$line" =~ ^linux[[:space:]] ]]; then
+                echo "initrd  /acpi_override.img" >> "$tmp"
+            fi
+        done < "$entry"
+    fi
+    mv "$tmp" "$entry"
+    log "Entrée patchée : $entry"
+}
+
+systemd_boot_classic_patch() {
+    local entries_dir="$ESP_DIR/loader/entries"
+    local found=0
+    if [[ -d "$entries_dir" ]]; then
+        shopt -s nullglob
+        for f in "$entries_dir"/*.conf; do
+            if grep -q '^linux[[:space:]]' "$f" 2>/dev/null; then
+                found=1
+                patch_entry_file "$f"
+            fi
+        done
+        shopt -u nullglob
+    fi
+    [[ $found -eq 1 ]]
+}
+
+# Sur Arch, convertit un setup UKI (arch-linux.efi) en boot classique
+# (vmlinuz + initramfs séparés) pour pouvoir y attacher l'override ACPI, et
+# crée les entrées de boot correspondantes.
+convert_arch_uki_to_classic() {
+    log "Configuration UKI détectée : conversion vers un boot classique (nécessaire pour l'override ACPI)..."
+
+    local preset="/etc/mkinitcpio.d/linux.preset"
+    [[ -f "$preset" ]] || die "Preset mkinitcpio introuvable : $preset"
+    cp "$preset" "${preset}.bak"
+
+    cat > "$preset" <<EOF
+# mkinitcpio preset file for the 'linux' package (modifié : override ACPI)
+ALL_kver="/boot/vmlinuz-linux"
+PRESETS=('default' 'fallback')
+default_image="/boot/initramfs-linux.img"
+fallback_image="/boot/initramfs-linux-fallback.img"
+fallback_options="-S autodetect"
+EOF
+    log "Preset modifié (sauvegarde : ${preset}.bak). Régénération des images..."
+    mkinitcpio -P
+
+    local root_opts kver
+    root_opts="$(sed -E 's/BOOT_IMAGE=[^ ]*//; s/initrd=[^ ]*//' /proc/cmdline | xargs)"
+    kver="$(uname -r)"
+
+    local ucode_line=""
+    for u in "$ESP_DIR"/amd-ucode.img "$ESP_DIR"/intel-ucode.img; do
+        [[ -f "$u" ]] && ucode_line="initrd  /$(basename "$u")"
+    done
+
+    mkdir -p "$ESP_DIR/loader/entries"
+    cat > "$ESP_DIR/loader/entries/arch.conf" <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+${ucode_line}
+initrd  /acpi_override.img
+initrd  /initramfs-linux.img
+options ${root_opts}
+EOF
+    cat > "$ESP_DIR/loader/entries/arch-fallback.conf" <<EOF
+title   Arch Linux (fallback)
+linux   /vmlinuz-linux
+${ucode_line}
+initrd  /acpi_override.img
+initrd  /initramfs-linux-fallback.img
+options ${root_opts}
+EOF
+    # Nettoyage des lignes vides si pas de microcode
+    sed -i '/^$/d' "$ESP_DIR/loader/entries/arch.conf" "$ESP_DIR/loader/entries/arch-fallback.conf"
+
+    sed -i '/^default /d' "$ESP_DIR/loader/loader.conf" 2>/dev/null || true
+    echo "default arch.conf" >> "$ESP_DIR/loader/loader.conf"
+
+    log "Entrées créées et définies par défaut : $ESP_DIR/loader/entries/arch.conf"
+    warn "Les anciennes images UKI (arch-linux*.efi) restent en place mais ne sont plus utilisées ;"
+    warn "vous pouvez les supprimer une fois le bon fonctionnement confirmé après redémarrage."
+}
+
+apply_systemd_boot_override() {
+    find_esp_dir
+    build_acpi_override_cpio
+
+    if systemd_boot_classic_patch; then
+        log "Entrées systemd-boot classiques trouvées et patchées avec succès."
+        return
+    fi
+
+    log "Aucune entrée de boot classique trouvée : setup probablement basé sur une UKI."
+    case "$FAMILY" in
+        arch)
+            convert_arch_uki_to_classic
+            ;;
+        fedora|debian)
+            warn "Setup UKI détecté sur $FAMILY : la conversion automatique n'est pas prise en"
+            warn "charge par ce script (mécanismes trop variables selon les versions de dracut/"
+            warn "systemd). Le fichier $ESP_DIR/acpi_override.img a été créé ; il faut l'ajouter"
+            warn "manuellement comme ligne 'initrd' (avant l'initrd principal) dans votre entrée"
+            warn "de boot ou reconstruire votre UKI en incluant ce segment en tête de l'initrd."
+            ;;
+    esac
+}
+
 main() {
     require_root
     detect_distro
@@ -276,15 +364,14 @@ main() {
             regen_grub_config
             ;;
         systemd-boot)
-            apply_initrd_override
+            install_dsdt
+            apply_systemd_boot_override
             ;;
     esac
 
     log "Terminé ! Redémarrez la machine pour que le touchpad soit pris en compte."
     log "Fichiers de travail conservés dans : $WORKDIR (dont dsdt.dsl.orig.bak, sauvegarde avant patch)"
-    if [[ "$BOOTLOADER" == "systemd-boot" ]]; then
-        log "Note : les images d'initramfs originales sont sauvegardées en *.orig dans /boot."
-    fi
+    log "Vérification après redémarrage : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
 }
 
 main "$@"
