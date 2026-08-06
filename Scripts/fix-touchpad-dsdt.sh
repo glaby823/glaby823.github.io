@@ -26,6 +26,7 @@ WORKDIR="${WORKDIR:-$HOME/acpi}"
 PATCH_URL="https://launchpadlibrarian.net/738328314/dsdt.patch"
 DSDT_TARGET="/boot/dsdt.aml"
 GRUB_CUSTOM="/etc/grub.d/40_custom"
+GRUB_ENTRY_TITLE="Arch Linux (DSDT patchee - touchpad)"
 
 log()  { echo -e "\n\033[1;34m==>\033[0m $*"; }
 warn() { echo -e "\033[1;33mAttention:\033[0m $*"; }
@@ -200,7 +201,7 @@ create_grub_menuentry() {
     {
         echo ""
         echo "$marker"
-        echo "menuentry 'Arch Linux (DSDT patchee - touchpad)' {"
+        echo "menuentry '${GRUB_ENTRY_TITLE}' {"
         echo "    acpi $grub_dsdt"
         echo "    linux $grub_kernel $root_opts"
         if [[ -n "$grub_ucode" ]]; then
@@ -211,8 +212,23 @@ create_grub_menuentry() {
         echo "}"
     } >> "$GRUB_CUSTOM"
 
-    log "Entrée ajoutée à $GRUB_CUSTOM, EN PLUS des entrées existantes (pas définie par défaut)."
+    log "Entrée ajoutée à $GRUB_CUSTOM, en plus des entrées existantes."
     warn "Les anciennes UKI ne sont ni déplacées ni supprimées : elles restent accessibles au menu."
+}
+
+set_grub_default() {
+    log "Passage de cette entrée en choix par défaut de GRUB..."
+    local def_file="/etc/default/grub"
+    [[ -f "$def_file" ]] || die "$def_file introuvable."
+
+    if [[ ! -f "${def_file}.bak" ]]; then
+        cp "$def_file" "${def_file}.bak"
+        log "Sauvegarde créée : ${def_file}.bak"
+    fi
+
+    sed -i '/^GRUB_DEFAULT=/d' "$def_file"
+    printf 'GRUB_DEFAULT="%s"\n' "$GRUB_ENTRY_TITLE" >> "$def_file"
+    log "GRUB_DEFAULT défini sur : $GRUB_ENTRY_TITLE"
 }
 
 regen_grub_config() {
@@ -461,6 +477,7 @@ main() {
         grub)
             install_dsdt
             create_grub_menuentry
+            set_grub_default
             regen_grub_config
             ;;
         systemd-boot)
@@ -469,12 +486,16 @@ main() {
             ;;
     esac
 
-    log "Terminé ! Redémarrez la machine SANS changer l'entrée par défaut."
-    log "Dans le menu GRUB/systemd-boot, sélectionnez manuellement la nouvelle entrée"
-    log "'Arch Linux (DSDT patchee - touchpad)' (ou 'arch.conf' sous systemd-boot) pour tester."
-    log "Votre ancienne entrée reste intacte et reste celle par défaut."
+    log "Terminé ! Redémarrez la machine."
+    if [[ "$BOOTLOADER" == "grub" ]]; then
+        log "L'entrée '${GRUB_ENTRY_TITLE}' est maintenant celle par défaut."
+        log "En cas de souci : /etc/default/grub.bak permet de revenir en arrière"
+        log "(sudo cp /etc/default/grub.bak /etc/default/grub && sudo grub-mkconfig -o /boot/grub/grub.cfg)."
+    else
+        log "Sélectionnez manuellement la nouvelle entrée dans le menu systemd-boot pour tester."
+    fi
     log "Fichiers de travail conservés dans : $WORKDIR (dont dsdt.dsl.orig.bak, sauvegarde avant patch)"
-    log "Vérification après redémarrage sur la nouvelle entrée : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
+    log "Vérification après redémarrage : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
 }
 
 main "$@"
