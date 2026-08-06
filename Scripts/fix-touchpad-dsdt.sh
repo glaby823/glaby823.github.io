@@ -26,7 +26,6 @@ WORKDIR="${WORKDIR:-$HOME/acpi}"
 PATCH_URL="https://launchpadlibrarian.net/738328314/dsdt.patch"
 DSDT_TARGET="/boot/dsdt.aml"
 GRUB_CUSTOM="/etc/grub.d/40_custom"
-GRUB_LINE="acpi ${DSDT_TARGET}"
 
 log()  { echo -e "\n\033[1;34m==>\033[0m $*"; }
 warn() { echo -e "\033[1;33mAttention:\033[0m $*"; }
@@ -143,17 +142,77 @@ install_dsdt() {
     cp dsdt.aml "$DSDT_TARGET"
 }
 
-### ---- Méthode GRUB : directive native "acpi", pas d'initrd impliqué ----
+### ---- Méthode GRUB : entrée de menu explicite, autonome ----
+# On n'utilise plus la simple directive "acpi" au niveau racine de
+# 40_custom : certains systèmes (comme ce test) n'ont pas de script
+# /etc/grub.d/10_linux pour générer les entrées linux/initrd automatiques,
+# donc rien ne consomme cette table. On écrit donc une entrée de menu
+# GRUB complète et indépendante, avec les bons chemins calculés via
+# grub-mkrelpath (qui gère correctement le cas où /boot EST la partition
+# EFI elle-même, où "acpi /boot/dsdt.aml" serait un chemin incorrect).
+# L'ancienne UKI n'est JAMAIS déplacée ni supprimée : cette entrée est
+# ajoutée en plus, jamais définie par défaut automatiquement.
 
-update_grub_custom() {
-    log "Mise à jour de $GRUB_CUSTOM..."
+create_grub_menuentry() {
+    log "Création d'une entrée GRUB explicite (indépendante de 10_linux)..."
+
+    local kernel_abs initramfs_abs
+    case "$FAMILY" in
+        arch)
+            kernel_abs="/boot/vmlinuz-linux"
+            initramfs_abs="/boot/initramfs-linux.img"
+            ;;
+        debian)
+            kernel_abs="/boot/vmlinuz-$(uname -r)"
+            initramfs_abs="/boot/initrd.img-$(uname -r)"
+            ;;
+        fedora)
+            kernel_abs="/boot/vmlinuz-$(uname -r)"
+            initramfs_abs="/boot/initramfs-$(uname -r).img"
+            ;;
+    esac
+    [[ -f "$kernel_abs" ]]    || die "Image noyau introuvable : $kernel_abs (le système utilise peut-être encore une UKI)"
+    [[ -f "$initramfs_abs" ]] || die "Initramfs introuvable : $initramfs_abs (le système utilise peut-être encore une UKI)"
+
+    local ucode_abs=""
+    for u in /boot/amd-ucode.img /boot/intel-ucode.img; do
+        [[ -f "$u" ]] && ucode_abs="$u"
+    done
+
+    command -v grub-mkrelpath >/dev/null 2>&1 || die "grub-mkrelpath introuvable (paquet grub non installé ?)."
+
+    local grub_dsdt grub_kernel grub_initramfs grub_ucode=""
+    grub_dsdt="$(grub-mkrelpath "$DSDT_TARGET")"
+    grub_kernel="$(grub-mkrelpath "$kernel_abs")"
+    grub_initramfs="$(grub-mkrelpath "$initramfs_abs")"
+    [[ -n "$ucode_abs" ]] && grub_ucode="$(grub-mkrelpath "$ucode_abs")"
+
+    local root_opts
+    root_opts="$(sed -E 's/BOOT_IMAGE=[^ ]*//; s/initrd=[^ ]*//' /proc/cmdline | xargs)"
+
     mkdir -p "$(dirname "$GRUB_CUSTOM")"
-    if [[ -f "$GRUB_CUSTOM" ]] && grep -qF "$GRUB_LINE" "$GRUB_CUSTOM"; then
-        log "La ligne est déjà présente, rien à faire."
-    else
-        printf '\n%s\n' "$GRUB_LINE" >> "$GRUB_CUSTOM"
-        log "Ligne ajoutée : $GRUB_LINE"
+    local marker="### fix-touchpad-dsdt.sh: entrée ACPI DSDT patchée ###"
+    if [[ -f "$GRUB_CUSTOM" ]] && grep -qF "$marker" "$GRUB_CUSTOM"; then
+        log "Entrée déjà présente dans $GRUB_CUSTOM, rien à faire."
+        return
     fi
+
+    {
+        echo ""
+        echo "$marker"
+        echo "menuentry 'Arch Linux (DSDT patchee - touchpad)' {"
+        echo "    acpi $grub_dsdt"
+        echo "    linux $grub_kernel $root_opts"
+        if [[ -n "$grub_ucode" ]]; then
+            echo "    initrd $grub_ucode $grub_initramfs"
+        else
+            echo "    initrd $grub_initramfs"
+        fi
+        echo "}"
+    } >> "$GRUB_CUSTOM"
+
+    log "Entrée ajoutée à $GRUB_CUSTOM, EN PLUS des entrées existantes (pas définie par défaut)."
+    warn "Les anciennes UKI ne sont ni déplacées ni supprimées : elles restent accessibles au menu."
 }
 
 regen_grub_config() {
@@ -296,17 +355,7 @@ fallback_options="-S autodetect"
 EOF
     log "Preset modifié (sauvegarde : ${preset}.bak). Régénération des images..."
     mkinitcpio -P
-
-    if [[ -d /boot/EFI/Linux ]]; then
-        local backup_dir="/boot/EFI/Linux-uki-backup"
-        mkdir -p "$backup_dir"
-        shopt -s nullglob
-        for f in /boot/EFI/Linux/*.efi; do
-            mv "$f" "$backup_dir/"
-            log "Ancienne UKI déplacée (hors de /boot/EFI/Linux, pour ne plus être détectée) : $backup_dir/$(basename "$f")"
-        done
-        shopt -u nullglob
-    fi
+    log "Images classiques générées. Les anciennes UKI restent en place dans /boot/EFI/Linux (non touchées)."
 }
 
 systemd_boot_classic_patch() {
@@ -375,9 +424,7 @@ create_systemd_boot_entries() {
         } > "$ESP_DIR/loader/entries/arch-fallback.conf"
     fi
 
-    sed -i '/^default /d' "$ESP_DIR/loader/loader.conf" 2>/dev/null || true
-    echo "default arch.conf" >> "$ESP_DIR/loader/loader.conf"
-    log "Entrées créées et définies par défaut : $ESP_DIR/loader/entries/arch.conf"
+    log "Entrées créées : $ESP_DIR/loader/entries/arch.conf (PAS définie par défaut, à choisir manuellement au menu)."
 }
 
 apply_systemd_boot_override() {
@@ -413,7 +460,7 @@ main() {
     case "$BOOTLOADER" in
         grub)
             install_dsdt
-            update_grub_custom
+            create_grub_menuentry
             regen_grub_config
             ;;
         systemd-boot)
@@ -422,9 +469,12 @@ main() {
             ;;
     esac
 
-    log "Terminé ! Redémarrez la machine pour que le touchpad soit pris en compte."
+    log "Terminé ! Redémarrez la machine SANS changer l'entrée par défaut."
+    log "Dans le menu GRUB/systemd-boot, sélectionnez manuellement la nouvelle entrée"
+    log "'Arch Linux (DSDT patchee - touchpad)' (ou 'arch.conf' sous systemd-boot) pour tester."
+    log "Votre ancienne entrée reste intacte et reste celle par défaut."
     log "Fichiers de travail conservés dans : $WORKDIR (dont dsdt.dsl.orig.bak, sauvegarde avant patch)"
-    log "Vérification après redémarrage : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
+    log "Vérification après redémarrage sur la nouvelle entrée : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
 }
 
 main "$@"
