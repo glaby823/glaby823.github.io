@@ -263,16 +263,29 @@ systemd_boot_classic_patch() {
     [[ $found -eq 1 ]]
 }
 
-# Sur Arch, convertit un setup UKI (arch-linux.efi) en boot classique
-# (vmlinuz + initramfs séparés) pour pouvoir y attacher l'override ACPI, et
-# crée les entrées de boot correspondantes.
-convert_arch_uki_to_classic() {
-    log "Configuration UKI détectée : conversion vers un boot classique (nécessaire pour l'override ACPI)..."
+# Détecte si le système est configuré pour démarrer via une UKI (Unified
+# Kernel Image) plutôt qu'un couple noyau+initramfs classique. Dans ce cas,
+# ni la commande "acpi" de GRUB, ni les entrées systemd-boot classiques ne
+# peuvent s'appliquer : le noyau et l'initrd sont packagés ensemble dans un
+# .efi autonome, chainloadé indépendamment de tout override.
+is_arch_uki_active() {
+    [[ "$FAMILY" == "arch" ]] || return 1
+    local preset="/etc/mkinitcpio.d/linux.preset"
+    [[ -f "$preset" ]] || return 1
+    grep -qE '^\s*default_uki=' "$preset"
+}
+
+# Convertit le preset mkinitcpio d'Arch pour produire une image classique
+# (vmlinuz + initramfs séparés) au lieu d'une UKI, régénère les images, et
+# déplace les anciennes UKI hors de /boot/EFI/Linux (nécessaire pour que le
+# hook GRUB "15_uki" cesse de les chainloader en priorité, et pour que
+# "10_linux" génère de vraies entrées linux/initrd).
+ensure_arch_classic_images() {
+    is_arch_uki_active || return 0
+    log "Configuration UKI détectée sur Arch : conversion vers un boot classique (nécessaire pour l'override ACPI, quel que soit le bootloader)..."
 
     local preset="/etc/mkinitcpio.d/linux.preset"
-    [[ -f "$preset" ]] || die "Preset mkinitcpio introuvable : $preset"
     cp "$preset" "${preset}.bak"
-
     cat > "$preset" <<EOF
 # mkinitcpio preset file for the 'linux' package (modifié : override ACPI)
 ALL_kver="/boot/vmlinuz-linux"
@@ -284,9 +297,57 @@ EOF
     log "Preset modifié (sauvegarde : ${preset}.bak). Régénération des images..."
     mkinitcpio -P
 
-    local root_opts kver
+    if [[ -d /boot/EFI/Linux ]]; then
+        local backup_dir="/boot/EFI/Linux-uki-backup"
+        mkdir -p "$backup_dir"
+        shopt -s nullglob
+        for f in /boot/EFI/Linux/*.efi; do
+            mv "$f" "$backup_dir/"
+            log "Ancienne UKI déplacée (hors de /boot/EFI/Linux, pour ne plus être détectée) : $backup_dir/$(basename "$f")"
+        done
+        shopt -u nullglob
+    fi
+}
+
+systemd_boot_classic_patch() {
+    local entries_dir="$ESP_DIR/loader/entries"
+    local found=0
+    if [[ -d "$entries_dir" ]]; then
+        shopt -s nullglob
+        for f in "$entries_dir"/*.conf; do
+            if grep -q '^linux[[:space:]]' "$f" 2>/dev/null; then
+                found=1
+                patch_entry_file "$f"
+            fi
+        done
+        shopt -u nullglob
+    fi
+    [[ $found -eq 1 ]]
+}
+
+# Crée des entrées systemd-boot génériques pointant vers les images
+# classiques (utilisé quand aucune entrée n'existait déjà, typiquement après
+# ensure_arch_classic_images, ou sur un système déjà classique sans entrée).
+create_systemd_boot_entries() {
+    local vmlinuz initramfs initramfs_fb
+    case "$FAMILY" in
+        arch)
+            vmlinuz="/vmlinuz-linux"
+            initramfs="/initramfs-linux.img"
+            initramfs_fb="/initramfs-linux-fallback.img"
+            ;;
+        *)
+            warn "Création automatique d'entrées systemd-boot non prise en charge pour $FAMILY."
+            warn "Le fichier $ESP_DIR/acpi_override.img a été créé ; ajoutez-le manuellement"
+            warn "comme ligne 'initrd' (avant l'initrd principal) dans votre entrée de boot."
+            return 1
+            ;;
+    esac
+
+    [[ -f "$ESP_DIR$vmlinuz" ]] || { warn "Image noyau introuvable : $ESP_DIR$vmlinuz"; return 1; }
+
+    local root_opts
     root_opts="$(sed -E 's/BOOT_IMAGE=[^ ]*//; s/initrd=[^ ]*//' /proc/cmdline | xargs)"
-    kver="$(uname -r)"
 
     local ucode_line=""
     for u in "$ESP_DIR"/amd-ucode.img "$ESP_DIR"/intel-ucode.img; do
@@ -294,31 +355,29 @@ EOF
     done
 
     mkdir -p "$ESP_DIR/loader/entries"
-    cat > "$ESP_DIR/loader/entries/arch.conf" <<EOF
-title   Arch Linux
-linux   /vmlinuz-linux
-${ucode_line}
-initrd  /acpi_override.img
-initrd  /initramfs-linux.img
-options ${root_opts}
-EOF
-    cat > "$ESP_DIR/loader/entries/arch-fallback.conf" <<EOF
-title   Arch Linux (fallback)
-linux   /vmlinuz-linux
-${ucode_line}
-initrd  /acpi_override.img
-initrd  /initramfs-linux-fallback.img
-options ${root_opts}
-EOF
-    # Nettoyage des lignes vides si pas de microcode
-    sed -i '/^$/d' "$ESP_DIR/loader/entries/arch.conf" "$ESP_DIR/loader/entries/arch-fallback.conf"
+    {
+        echo "title   Arch Linux"
+        echo "linux   $vmlinuz"
+        [[ -n "$ucode_line" ]] && echo "$ucode_line"
+        echo "initrd  /acpi_override.img"
+        echo "initrd  $initramfs"
+        echo "options $root_opts"
+    } > "$ESP_DIR/loader/entries/arch.conf"
+
+    if [[ -f "$ESP_DIR$initramfs_fb" ]]; then
+        {
+            echo "title   Arch Linux (fallback)"
+            echo "linux   $vmlinuz"
+            [[ -n "$ucode_line" ]] && echo "$ucode_line"
+            echo "initrd  /acpi_override.img"
+            echo "initrd  $initramfs_fb"
+            echo "options $root_opts"
+        } > "$ESP_DIR/loader/entries/arch-fallback.conf"
+    fi
 
     sed -i '/^default /d' "$ESP_DIR/loader/loader.conf" 2>/dev/null || true
     echo "default arch.conf" >> "$ESP_DIR/loader/loader.conf"
-
     log "Entrées créées et définies par défaut : $ESP_DIR/loader/entries/arch.conf"
-    warn "Les anciennes images UKI (arch-linux*.efi) restent en place mais ne sont plus utilisées ;"
-    warn "vous pouvez les supprimer une fois le bon fonctionnement confirmé après redémarrage."
 }
 
 apply_systemd_boot_override() {
@@ -330,19 +389,8 @@ apply_systemd_boot_override() {
         return
     fi
 
-    log "Aucune entrée de boot classique trouvée : setup probablement basé sur une UKI."
-    case "$FAMILY" in
-        arch)
-            convert_arch_uki_to_classic
-            ;;
-        fedora|debian)
-            warn "Setup UKI détecté sur $FAMILY : la conversion automatique n'est pas prise en"
-            warn "charge par ce script (mécanismes trop variables selon les versions de dracut/"
-            warn "systemd). Le fichier $ESP_DIR/acpi_override.img a été créé ; il faut l'ajouter"
-            warn "manuellement comme ligne 'initrd' (avant l'initrd principal) dans votre entrée"
-            warn "de boot ou reconstruire votre UKI en incluant ce segment en tête de l'initrd."
-            ;;
-    esac
+    log "Aucune entrée de boot classique trouvée."
+    create_systemd_boot_entries || true
 }
 
 main() {
@@ -356,6 +404,11 @@ main() {
     download_patch
     apply_patch
     reassemble_dsdt
+
+    # La conversion UKI -> classique doit se faire AVANT la configuration du
+    # bootloader, quel que soit celui-ci : sans elle, ni "acpi" (GRUB) ni les
+    # entrées systemd-boot classiques ne peuvent s'appliquer.
+    ensure_arch_classic_images
 
     case "$BOOTLOADER" in
         grub)
