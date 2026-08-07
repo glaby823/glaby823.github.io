@@ -322,21 +322,6 @@ patch_entry_file() {
     log "Entrée patchée : $entry"
 }
 
-systemd_boot_classic_patch() {
-    local entries_dir="$ESP_DIR/loader/entries"
-    local found=0
-    if [[ -d "$entries_dir" ]]; then
-        shopt -s nullglob
-        for f in "$entries_dir"/*.conf; do
-            if grep -q '^linux[[:space:]]' "$f" 2>/dev/null; then
-                found=1
-                patch_entry_file "$f"
-            fi
-        done
-        shopt -u nullglob
-    fi
-    [[ $found -eq 1 ]]
-}
 
 # Détecte si le système est configuré pour démarrer via une UKI (Unified
 # Kernel Image) plutôt qu'un couple noyau+initramfs classique. Dans ce cas,
@@ -377,17 +362,36 @@ EOF
 systemd_boot_classic_patch() {
     local entries_dir="$ESP_DIR/loader/entries"
     local found=0
+    PATCHED_ENTRY_NAME=""
     if [[ -d "$entries_dir" ]]; then
         shopt -s nullglob
         for f in "$entries_dir"/*.conf; do
             if grep -q '^linux[[:space:]]' "$f" 2>/dev/null; then
                 found=1
                 patch_entry_file "$f"
+                [[ -z "$PATCHED_ENTRY_NAME" ]] && PATCHED_ENTRY_NAME="$(basename "$f")"
             fi
         done
         shopt -u nullglob
     fi
     [[ $found -eq 1 ]]
+}
+
+# Sauvegarde loader.conf (une seule fois) et définit l'entrée donnée comme
+# choix de démarrage par défaut.
+set_systemd_boot_default() {
+    local entry_name="$1"
+    local loader_conf="$ESP_DIR/loader/loader.conf"
+
+    [[ -f "$loader_conf" ]] || touch "$loader_conf"
+    if [[ ! -f "${loader_conf}.bak" ]]; then
+        cp "$loader_conf" "${loader_conf}.bak"
+        log "Sauvegarde créée : ${loader_conf}.bak"
+    fi
+
+    sed -i '/^default /d' "$loader_conf"
+    echo "default ${entry_name}" >> "$loader_conf"
+    log "Entrée par défaut définie : $entry_name"
 }
 
 # Crée des entrées systemd-boot génériques pointant vers les images
@@ -440,7 +444,8 @@ create_systemd_boot_entries() {
         } > "$ESP_DIR/loader/entries/arch-fallback.conf"
     fi
 
-    log "Entrées créées : $ESP_DIR/loader/entries/arch.conf (PAS définie par défaut, à choisir manuellement au menu)."
+    log "Entrées créées : $ESP_DIR/loader/entries/arch.conf"
+    PATCHED_ENTRY_NAME="arch.conf"
 }
 
 apply_systemd_boot_override() {
@@ -449,11 +454,16 @@ apply_systemd_boot_override() {
 
     if systemd_boot_classic_patch; then
         log "Entrées systemd-boot classiques trouvées et patchées avec succès."
-        return
+    else
+        log "Aucune entrée de boot classique trouvée, création de nouvelles entrées."
+        create_systemd_boot_entries || true
     fi
 
-    log "Aucune entrée de boot classique trouvée."
-    create_systemd_boot_entries || true
+    if [[ -n "${PATCHED_ENTRY_NAME:-}" ]]; then
+        set_systemd_boot_default "$PATCHED_ENTRY_NAME"
+    else
+        warn "Impossible de déterminer une entrée à définir par défaut ; sélectionnez-la manuellement au menu."
+    fi
 }
 
 main() {
@@ -492,7 +502,7 @@ main() {
         log "En cas de souci : /etc/default/grub.bak permet de revenir en arrière"
         log "(sudo cp /etc/default/grub.bak /etc/default/grub && sudo grub-mkconfig -o /boot/grub/grub.cfg)."
     else
-        log "Sélectionnez manuellement la nouvelle entrée dans le menu systemd-boot pour tester."
+        log "L'entrée patchée est maintenant celle par défaut (loader.conf.bak pour revenir en arrière)."
     fi
     log "Fichiers de travail conservés dans : $WORKDIR (dont dsdt.dsl.orig.bak, sauvegarde avant patch)"
     log "Vérification après redémarrage : sudo dmesg | grep -i dsdt (doit afficher 00001001, pas 00001000)"
